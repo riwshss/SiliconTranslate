@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 // SILK_API_URL: Silk backend the cloud engine talks to (the deployed Cloudflare Worker).
 // SILK_CHANNEL: "beta" (default: everything unlocked, Beta in the name) or "stable".
 // SILK_OUTDIR: output folder, so E2E can build a variant without touching dist/.
-const DEFAULT_API_URL = 'http://127.0.0.1:8787'
+const DEFAULT_API_URL = 'https://silk-translate-api.silktranslate.workers.dev'
 
 const isWatch = process.argv.includes('--watch')
 const outdir = process.env.SILK_OUTDIR || 'dist'

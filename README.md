@@ -80,19 +80,15 @@ npx wrangler secret put OPENROUTER_API_KEY  # 粘贴 OpenRouter Key（https://op
 npx wrangler deploy                         # 输出 https://silk-translate-api.<你的子域>.workers.dev
 ```
 
-然后用这个地址重新构建扩展：
+正式后端已部署在 `https://silk-translate-api.silktranslate.workers.dev`，并且是 `build.mjs` 的默认地址，直接 `npm run package` 即可。部署到别的地址时，用 `SILK_API_URL=… npm run package` 覆盖。
 
-```bash
-SILK_API_URL=https://silk-translate-api.<你的子域>.workers.dev npm run package
-```
-
-建议在 OpenRouter 后台给这个 Key 设置**消费上限**，作为全站额度之外的第二道保险。本地调试：`server/.dev.vars` 写入 `OPENROUTER_API_KEY=…` 后运行 `npm run dev`（`http://127.0.0.1:8787`，也是扩展未指定地址时的默认后端）。
+建议在 OpenRouter 后台给这个 Key 设置**消费上限**，作为全站额度之外的第二道保险。本地调试：`server/.dev.vars` 写入 `OPENROUTER_API_KEY=…` 后运行 `npm run dev`（`http://127.0.0.1:8787`），再用 `SILK_API_URL=http://127.0.0.1:8787 npm run build` 构建连本地后端的扩展。
 
 ### 构建参数
 
 | 环境变量 | 说明 |
 |---|---|
-| `SILK_API_URL` | Silk 后端地址，会自动加入 manifest 的 `host_permissions`。只接受 https（本机可用 http） |
+| `SILK_API_URL` | Silk 后端地址，默认是正式后端；会自动加入 manifest 的 `host_permissions`。只接受 https（本机可用 http） |
 | `SILK_CHANNEL` | `beta`（默认：名称带 Beta，云端 AI 默认可用）或 `stable` |
 | `SILK_OUTDIR` | 输出目录，默认 `dist` |
 
