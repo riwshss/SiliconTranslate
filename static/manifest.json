@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_appName__",
   "short_name": "__MSG_appShortName__",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "default_locale": "en",
   "description": "__MSG_appDescription__",
   "minimum_chrome_version": "116",
@@ -28,6 +28,14 @@
       "32": "icons/icon-32.png",
       "48": "icons/icon-48.png",
       "128": "icons/icon-128.png"
+    }
+  },
+  "commands": {
+    "toggle-translation": {
+      "suggested_key": {
+        "default": "Alt+T"
+      },
+      "description": "__MSG_commandToggle__"
     }
   },
   "icons": {

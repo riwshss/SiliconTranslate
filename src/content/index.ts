@@ -1,7 +1,6 @@
 import { resolveUiLang, translator } from '../shared/i18n'
-import type { TabMessage } from '../shared/messages'
+import type { PageState, TabMessage } from '../shared/messages'
 import { loadSettings, onSettingsChanged, type DisplayMode, type TranslateMode } from '../shared/settings'
-import { matchesShortcut } from '../shared/shortcut'
 import { PageTranslator } from './page-translator'
 import { createUiHost } from './ui/host'
 import { createHud } from './ui/hud'
@@ -26,7 +25,13 @@ function nextMode(current: DisplayMode, preferred: TranslateMode): DisplayMode {
   return order[(order.indexOf(current) + 1) % order.length]
 }
 
-async function main(): Promise<void> {
+interface PageControls {
+  getState(): PageState
+  setMode(mode: DisplayMode): void
+  toggle(): void
+}
+
+async function main(): Promise<PageControls> {
   let settings = await loadSettings()
   const host = location.hostname
   const ui = createUiHost(resolveUiLang(settings.uiLang))
@@ -58,29 +63,33 @@ async function main(): Promise<void> {
     pageTranslator.setMode(mode)
   }
 
-  chrome.runtime.onMessage.addListener((message: TabMessage, sender, sendResponse) => {
-    if (sender.id !== chrome.runtime.id) return false
-    if (message?.type === 'silk:set-mode' && isDisplayMode(message.mode)) setMode(message.mode)
-    if (message?.type === 'silk:get-state' || message?.type === 'silk:set-mode') sendResponse(pageTranslator.getState())
-    return false
-  })
-
-  document.addEventListener(
-    'keydown',
-    (e) => {
-      if (e.repeat || !matchesShortcut(e, settings.shortcut)) return
-      e.preventDefault()
-      e.stopPropagation()
-      setMode(nextMode(pageTranslator.getState().mode, settings.defaultMode))
-    },
-    true,
-  )
-
   if (settings.domainRules[host] === 'always') setMode(settings.defaultMode)
+  return {
+    getState: () => pageTranslator.getState(),
+    setMode,
+    toggle: () => setMode(nextMode(pageTranslator.getState().mode, settings.defaultMode)),
+  }
 }
 
-// Guard against double injection (manifest + scripting fallback from the popup).
+function handleMessage(controls: PageControls, message: TabMessage): PageState {
+  if (message.type === 'silk:set-mode' && isDisplayMode(message.mode)) controls.setMode(message.mode)
+  if (message.type === 'silk:toggle') controls.toggle()
+  return controls.getState()
+}
+
+const MESSAGE_TYPES: ReadonlySet<string> = new Set(['silk:get-state', 'silk:set-mode', 'silk:toggle'])
+
+// Guard against double injection (registered content script + injection from the popup or the
+// shortcut).
 if (!window.__silkTranslateLoaded && document.documentElement instanceof HTMLHtmlElement && document.body) {
   window.__silkTranslateLoaded = true
-  main().catch((err) => console.error('[silk] content script failed to start', err))
+  const ready = main()
+  ready.catch((err) => console.error('[silk] content script failed to start', err))
+  // Listening right away, not after settings have loaded: whoever just injected this script
+  // sends its message as soon as the injection returns.
+  chrome.runtime.onMessage.addListener((message: TabMessage, sender, sendResponse) => {
+    if (sender.id !== chrome.runtime.id || !MESSAGE_TYPES.has(message?.type)) return false
+    ready.then((controls) => sendResponse(handleMessage(controls, message))).catch(() => sendResponse(null))
+    return true
+  })
 }

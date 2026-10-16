@@ -14,5 +14,9 @@
   "appDescription": {
     "message": "Seamless web page translation with Silk AI: bilingual view and selection translation.",
     "description": "Store and extensions-page description. Do not name models that are not available yet."
+  },
+  "commandToggle": {
+    "message": "Translate this page / switch mode (original → default mode → the other mode)",
+    "description": "The keyboard shortcut's name at chrome://extensions/shortcuts."
   }
 }

@@ -1,8 +1,8 @@
 // Site access: the store build asks for no site at install. Users grant every site (selection
-// translation, the page shortcut and "always translate" work everywhere) or one site at a time
-// ("always translate" on that host) through optional_host_permissions, and the service worker
-// registers the content script for exactly the origins granted. Without a grant the popup still
-// injects into the active tab on click (activeTab).
+// translation and "always translate" work everywhere) or one site at a time ("always translate"
+// on that host) through optional_host_permissions, and the service worker registers the content
+// script for exactly the origins granted. Without a grant, the toolbar icon and the keyboard
+// shortcut (a browser command) still inject into the active tab when used (activeTab).
 
 export const ALL_SITES: readonly string[] = ['http://*/*', 'https://*/*']
 

@@ -1,20 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { compactNumber, errorText, MESSAGE_KEYS, resolveUiLang, translator } from '../src/shared/i18n'
 import { CLOUD_MODELS, DEFAULT_SETTINGS, dropLegacySettings, engineId, MAX_CONCURRENCY, sanitizeSettings, withDomainRule } from '../src/shared/settings'
-import { eventToShortcut, isValidShortcut, matchesShortcut } from '../src/shared/shortcut'
+import { handleCommand, TOGGLE_COMMAND } from '../src/shared/tab-messaging'
+import manifest from '../static/manifest.json'
 import { chineseTargetFor, defaultTargetLang, getLanguage } from '../src/shared/languages'
 import { contentScriptMatches, sitePattern } from '../src/shared/site-access'
 import { sanitizeDevKey } from '../src/shared/dev-key'
-
-const key = (code: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}) => ({
-  code,
-  key: '',
-  ctrlKey: false,
-  altKey: false,
-  shiftKey: false,
-  metaKey: false,
-  ...mods,
-})
 
 describe('sanitizeSettings', () => {
   // The default target follows navigator.languages, which Node fills from the machine locale.
@@ -34,7 +25,6 @@ describe('sanitizeSettings', () => {
       defaultMode: 'bilingual',
       bilingualStyle: 'highlight',
       animateTranslations: false,
-      shortcut: 'Ctrl+Shift+Y',
       selectionEnabled: false,
       domainRules: { 'example.com': 'always', 'bad host!': 'always', 'x.org': 'sometimes' },
     })
@@ -45,7 +35,6 @@ describe('sanitizeSettings', () => {
       defaultMode: 'bilingual',
       bilingualStyle: 'highlight',
       animateTranslations: false,
-      shortcut: 'Ctrl+Shift+Y',
       selectionEnabled: false,
       domainRules: { 'example.com': 'always' },
     })
@@ -65,13 +54,11 @@ describe('sanitizeSettings', () => {
     const result = sanitizeSettings({
       targetLang: 'xx',
       defaultMode: 'original',
-      shortcut: 'T',
       model: 'deepseek-ai/DeepSeek-V3',
       uiLang: 'fr',
     })
     expect(result.targetLang).toBe('zh-CN')
     expect(result.defaultMode).toBe('overlay')
-    expect(result.shortcut).toBe('Alt+T')
     expect(result.model).toBe(DEFAULT_SETTINGS.model)
     expect(result.uiLang).toBe('auto')
   })
@@ -98,7 +85,7 @@ describe('sanitizeSettings', () => {
   })
 
   it('dropLegacySettings removes stored API keys once and leaves clean settings untouched', async () => {
-    const store: Record<string, unknown> = { settings: { provider: 'openai', apiKey: 'sk-1', targetLang: 'ja' } }
+    const store: Record<string, unknown> = { settings: { provider: 'openai', apiKey: 'sk-1', shortcut: 'Alt+Y', targetLang: 'ja' } }
     const set = vi.fn(async (items: Record<string, unknown>) => Object.assign(store, items))
     vi.stubGlobal('chrome', { storage: { local: { get: async (key: string) => ({ [key]: store[key] }), set } } })
     await dropLegacySettings()
@@ -125,26 +112,33 @@ describe('sanitizeSettings', () => {
 })
 
 describe('shortcut', () => {
-  it('formats physical keys with modifiers', () => {
-    expect(eventToShortcut(key('KeyT', { altKey: true }))).toBe('Alt+T')
-    expect(eventToShortcut(key('Digit1', { ctrlKey: true, shiftKey: true }))).toBe('Ctrl+Shift+1')
-    expect(eventToShortcut(key('F2'))).toBe('F2')
-    expect(eventToShortcut(key('AltLeft', { altKey: true }))).toBeNull()
-    expect(eventToShortcut(key('IntlRo'))).toBeNull()
+  it('is a browser command (works without site access), Alt+T by default', () => {
+    expect(manifest.commands).toEqual({ [TOGGLE_COMMAND]: { suggested_key: { default: 'Alt+T' }, description: '__MSG_commandToggle__' } })
   })
 
-  it('validates that a shortcut cannot fire during normal typing', () => {
-    expect(isValidShortcut('Alt+T')).toBe(true)
-    expect(isValidShortcut('F8')).toBe(true)
-    expect(isValidShortcut('Shift+T')).toBe(false)
-    expect(isValidShortcut('T')).toBe(false)
-    expect(isValidShortcut('Hyper+T')).toBe(false)
-    expect(isValidShortcut(42)).toBe(false)
+  it('toggles the tab it was pressed in, injecting the content script where it is not running', async () => {
+    let isInjected = false
+    const sendMessage = vi.fn(async () => {
+      if (!isInjected) throw new Error('Receiving end does not exist')
+      return { mode: 'overlay' }
+    })
+    const executeScript = vi.fn(async () => {
+      isInjected = true
+    })
+    vi.stubGlobal('chrome', { tabs: { sendMessage }, scripting: { executeScript } })
+    await handleCommand(TOGGLE_COMMAND, { id: 7 } as chrome.tabs.Tab)
+    expect(executeScript).toHaveBeenCalledWith({ target: { tabId: 7 }, files: ['content.js'] })
+    expect(sendMessage).toHaveBeenLastCalledWith(7, { type: 'silk:toggle' })
+    await handleCommand(TOGGLE_COMMAND, { id: 7 } as chrome.tabs.Tab)
+    expect(executeScript).toHaveBeenCalledTimes(1)
+    await handleCommand('other-command', { id: 7 } as chrome.tabs.Tab)
+    await handleCommand(TOGGLE_COMMAND, undefined)
+    expect(sendMessage).toHaveBeenCalledTimes(3)
+    vi.unstubAllGlobals()
   })
 
-  it('matches events against a stored shortcut', () => {
-    expect(matchesShortcut(key('KeyT', { altKey: true }), 'Alt+T')).toBe(true)
-    expect(matchesShortcut(key('KeyT', { altKey: true, shiftKey: true }), 'Alt+T')).toBe(false)
+  it('drops the old in-page shortcut setting', () => {
+    expect(sanitizeSettings({ shortcut: 'Ctrl+Shift+Y' })).toEqual(DEFAULT_SETTINGS)
   })
 })
 

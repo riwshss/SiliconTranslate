@@ -1,6 +1,5 @@
 import { UI_LANG_SETTINGS, type MessageKey, type UiLangSetting } from './i18n'
 import { defaultTargetLang, isKnownLanguage } from './languages'
-import { isValidShortcut } from './shortcut'
 
 export type DisplayMode = 'original' | 'overlay' | 'bilingual'
 export type TranslateMode = Exclude<DisplayMode, 'original'>
@@ -36,7 +35,6 @@ export interface Settings {
   readonly bilingualStyle: BilingualStyle
   /** Bilingual translations fade in as they arrive (docs/DESIGN.md §6); some readers find motion distracting. */
   readonly animateTranslations: boolean
-  readonly shortcut: string
   readonly selectionEnabled: boolean
   readonly domainRules: Readonly<Record<string, DomainRule>>
 }
@@ -54,7 +52,6 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultMode: 'overlay',
   bilingualStyle: 'silk',
   animateTranslations: true,
-  shortcut: 'Alt+T',
   selectionEnabled: true,
   domainRules: {},
 }
@@ -77,7 +74,8 @@ function sanitizeDomainRules(value: unknown): Record<string, DomainRule> {
 
 /**
  * Storage is external input: every field is validated and falls back to its default. Fields of
- * removed engines (provider, API keys, base URL) and the old concurrency setting are dropped here.
+ * removed engines (provider, API keys, base URL), the old concurrency setting and the old in-page
+ * shortcut (now a browser command) are dropped here.
  */
 export function sanitizeSettings(raw: unknown): Settings {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
@@ -89,7 +87,6 @@ export function sanitizeSettings(raw: unknown): Settings {
     // Installs that already chose a style keep it; only new ones (nothing stored) get silk.
     bilingualStyle: pickEnum(src.bilingualStyle, BILINGUAL_STYLES, DEFAULT_SETTINGS.bilingualStyle),
     animateTranslations: typeof src.animateTranslations === 'boolean' ? src.animateTranslations : true,
-    shortcut: isValidShortcut(src.shortcut) ? src.shortcut : DEFAULT_SETTINGS.shortcut,
     selectionEnabled: typeof src.selectionEnabled === 'boolean' ? src.selectionEnabled : true,
     domainRules: sanitizeDomainRules(src.domainRules),
   }
@@ -113,10 +110,10 @@ export async function saveSettings(patch: Partial<Settings>): Promise<Settings> 
 }
 
 /**
- * Fields of the engines earlier versions offered (OpenAI-compatible, Google, Chrome on-device), and
- * the concurrency setting that is now fixed.
+ * Fields of the engines earlier versions offered (OpenAI-compatible, Google, Chrome on-device), the
+ * concurrency setting that is now fixed, and the in-page shortcut that is now a browser command.
  */
-const LEGACY_KEYS = ['provider', 'apiKey', 'googleApiKey', 'baseUrl', 'maxConcurrency']
+const LEGACY_KEYS = ['provider', 'apiKey', 'googleApiKey', 'baseUrl', 'maxConcurrency', 'shortcut']
 
 /**
  * Rewrites stored settings only when they still hold legacy fields, so API keys from earlier

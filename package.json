@@ -1,6 +1,6 @@
 {
   "name": "silk-translate",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "private": true,
   "type": "module",
   "description": "丝译 Silk Translate — Silk AI 云端翻译 · 双语对照 · 划词翻译，中英文界面",
