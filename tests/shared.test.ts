@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { compactNumber, errorText, MESSAGE_KEYS, resolveUiLang, translator } from '../src/shared/i18n'
 import { CLOUD_MODELS, DEFAULT_SETTINGS, dropLegacySettings, engineId, MAX_CONCURRENCY, sanitizeSettings, withDomainRule } from '../src/shared/settings'
 import { eventToShortcut, isValidShortcut, matchesShortcut } from '../src/shared/shortcut'
@@ -16,6 +16,10 @@ const key = (code: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey
 })
 
 describe('sanitizeSettings', () => {
+  // The default target follows navigator.languages, which Node fills from the machine locale.
+  beforeEach(() => vi.stubGlobal('navigator', { languages: ['en-US'] }))
+  afterEach(() => vi.unstubAllGlobals())
+
   it('returns defaults for garbage input', () => {
     expect(sanitizeSettings(null)).toEqual(DEFAULT_SETTINGS)
     expect(sanitizeSettings('x')).toEqual(DEFAULT_SETTINGS)
@@ -69,6 +73,12 @@ describe('sanitizeSettings', () => {
     expect(result.shortcut).toBe('Alt+T')
     expect(result.model).toBe(DEFAULT_SETTINGS.model)
     expect(result.uiLang).toBe('auto')
+  })
+
+  it('defaults the target to the browser’s Chinese variant when none is stored', () => {
+    vi.stubGlobal('navigator', { languages: ['zh-TW'] })
+    expect(sanitizeSettings({}).targetLang).toBe('zh-TW')
+    expect(sanitizeSettings({ targetLang: 'ja' }).targetLang).toBe('ja')
   })
 
   it('offers the four Silk AI models and defaults to the cheapest', () => {
