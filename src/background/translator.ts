@@ -7,30 +7,23 @@ import { createObjectStreamParser } from '../core/stream-json'
 import { isLikelyInLanguage } from '../core/text-filter'
 import { getLanguage, type Language } from '../shared/languages'
 import type { ErrorCode } from '../shared/messages'
-import type { Settings } from '../shared/settings'
+import { MAX_CONCURRENCY, type Settings } from '../shared/settings'
 import { cloudApiConfig, usableModel } from './account'
 import { onRateLimited, streamChat, type ApiConfig } from './api'
 
 const CACHE_SIZE = 3000
 
-const pool = new ConcurrencyPool(4)
+const pool = new ConcurrencyPool(MAX_CONCURRENCY)
 const cache = new LruCache<string, string>(CACHE_SIZE)
 
 /**
  * Concurrency adapts to rate limits: every 429 halves it, every successful request raises it by
- * one again, never above the user's setting.
+ * one again, never above MAX_CONCURRENCY.
  */
-let configuredConcurrency = 4
-
-export function setConcurrency(limit: number): void {
-  configuredConcurrency = limit
-  pool.setLimit(limit)
-}
-
 onRateLimited(() => pool.setLimit(Math.max(1, Math.floor(pool.capacity / 2))))
 
 function recoverConcurrency(): void {
-  if (pool.capacity < configuredConcurrency) pool.setLimit(pool.capacity + 1)
+  if (pool.capacity < MAX_CONCURRENCY) pool.setLimit(pool.capacity + 1)
 }
 
 /** Chat-completions endpoint: the Silk backend, with the chosen model if the plan allows it. */

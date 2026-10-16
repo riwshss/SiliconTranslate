@@ -330,13 +330,6 @@ async function init(): Promise<void> {
   selection.checked = settings.selectionEnabled
   selection.addEventListener('change', () => void persist({ selectionEnabled: selection.checked }))
 
-  const concurrency = $<HTMLInputElement>('concurrency')
-  concurrency.value = String(settings.maxConcurrency)
-  concurrency.addEventListener('change', async () => {
-    await persist({ maxConcurrency: Number(concurrency.value) })
-    concurrency.value = String(settings.maxConcurrency)
-  })
-
   initModelPicker()
   applyLanguage()
   $('ui-lang').addEventListener('change', async (e) => {

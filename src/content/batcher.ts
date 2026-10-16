@@ -1,9 +1,9 @@
+import { splitBatches } from '../core/batching'
 import type { Translate } from '../shared/i18n'
 import { PORT_BATCH, type BatchEvent, type BatchRequest, type ErrorCode } from '../shared/messages'
+import { MAX_CONCURRENCY } from '../shared/settings'
 
 const FLUSH_DELAY_MS = 60
-const MAX_ITEMS = 12
-const MAX_CHARS = 1800
 
 export interface BatcherHooks {
   onResult(key: string, translation: string): void
@@ -13,8 +13,11 @@ export interface BatcherHooks {
 /**
  * Collects markup keys for a short window and ships them in size-bounded batches,
  * one runtime Port per batch (closing the port aborts the request in the worker).
+ * Visible keys go out first, spread over every connection, so the screen the user is
+ * looking at fills in before the prefetched area below it.
  */
 export class Batcher {
+  private urgent: string[] = []
   private queue: string[] = []
   private timer: ReturnType<typeof setTimeout> | null = null
   private readonly ports = new Set<chrome.runtime.Port>()
@@ -25,8 +28,10 @@ export class Batcher {
     private readonly getT: () => Translate,
   ) {}
 
-  enqueue(key: string): void {
-    this.queue = [...this.queue, key]
+  /** `isVisible`: on screen now (sent first), as opposed to prefetched ahead of scrolling. */
+  enqueue(key: string, isVisible = false): void {
+    if (isVisible) this.urgent = [...this.urgent, key]
+    else this.queue = [...this.queue, key]
     this.timer ??= setTimeout(() => this.flush(), FLUSH_DELAY_MS)
   }
 
@@ -34,6 +39,7 @@ export class Batcher {
   cancelAll(): void {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    this.urgent = []
     this.queue = []
     this.ports.forEach((port) => port.disconnect())
     this.ports.clear()
@@ -41,19 +47,10 @@ export class Batcher {
 
   private flush(): void {
     this.timer = null
-    let batch: string[] = []
-    let chars = 0
-    for (const key of this.queue) {
-      if (batch.length && (batch.length >= MAX_ITEMS || chars + key.length > MAX_CHARS)) {
-        this.send(batch)
-        batch = []
-        chars = 0
-      }
-      batch.push(key)
-      chars += key.length
-    }
-    if (batch.length) this.send(batch)
+    const batches = [...splitBatches(this.urgent, MAX_CONCURRENCY), ...splitBatches(this.queue, MAX_CONCURRENCY)]
+    this.urgent = []
     this.queue = []
+    batches.forEach((batch) => this.send(batch))
   }
 
   private send(keys: string[]): void {

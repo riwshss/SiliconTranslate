@@ -163,7 +163,7 @@ h2 { margin: 0 0 2px; font-size: 12px; font-weight: 650; color: var(--muted); le
 .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; }
 .field > span:first-child { color: var(--ink); }
 
-select, .num {
+select {
   height: 32px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -174,8 +174,7 @@ select, .num {
 }
 select { cursor: pointer; padding-right: 6px; }
 .field select { min-width: 150px; }
-.num { width: 72px; text-align: center; }
-select:focus, .num:focus {
+select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -256,12 +255,6 @@ kbd {
 
 #test-result.ok { color: var(--accent); }
 #test-result.error { color: var(--danger); }
-
-details { border-top: 1px solid var(--line); padding-top: 8px; }
-details[open] { display: grid; gap: 10px; }
-summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; user-select: none; }
-summary::before { content: "›"; display: inline-block; width: 12px; transition: transform 0.2s; }
-details[open] summary::before { transform: rotate(90deg); }
 
 footer { display: flex; justify-content: space-between; align-items: center; padding: 0 4px 2px; font-size: 12px; }
 footer a { color: var(--accent); text-decoration: none; font-weight: 550; }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { resolveUiLang, translator } from '../src/shared/i18n'
-import { CLOUD_MODELS, DEFAULT_SETTINGS, dropLegacySettings, engineId, sanitizeSettings, withDomainRule } from '../src/shared/settings'
+import { CLOUD_MODELS, DEFAULT_SETTINGS, dropLegacySettings, engineId, MAX_CONCURRENCY, sanitizeSettings, withDomainRule } from '../src/shared/settings'
 import { eventToShortcut, isValidShortcut, matchesShortcut } from '../src/shared/shortcut'
 import { getLanguage } from '../src/shared/languages'
 
@@ -29,7 +29,6 @@ describe('sanitizeSettings', () => {
       bilingualStyle: 'highlight',
       shortcut: 'Ctrl+Shift+Y',
       selectionEnabled: false,
-      maxConcurrency: 6,
       domainRules: { 'example.com': 'always', 'bad host!': 'always', 'x.org': 'sometimes' },
     })
     expect(result).toEqual({
@@ -40,7 +39,6 @@ describe('sanitizeSettings', () => {
       bilingualStyle: 'highlight',
       shortcut: 'Ctrl+Shift+Y',
       selectionEnabled: false,
-      maxConcurrency: 6,
       domainRules: { 'example.com': 'always' },
     })
   })
@@ -50,14 +48,12 @@ describe('sanitizeSettings', () => {
       targetLang: 'xx',
       defaultMode: 'original',
       shortcut: 'T',
-      maxConcurrency: 99,
       model: 'deepseek-ai/DeepSeek-V3',
       uiLang: 'fr',
     })
     expect(result.targetLang).toBe('zh-CN')
     expect(result.defaultMode).toBe('overlay')
     expect(result.shortcut).toBe('Alt+T')
-    expect(result.maxConcurrency).toBe(4)
     expect(result.model).toBe(DEFAULT_SETTINGS.model)
     expect(result.uiLang).toBe('auto')
   })
@@ -65,6 +61,11 @@ describe('sanitizeSettings', () => {
   it('offers the four Silk AI models and defaults to the cheapest', () => {
     expect(CLOUD_MODELS.map((m) => m.id)).toEqual(['deepseek/deepseek-v4-flash', 'anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash'])
     expect(DEFAULT_SETTINGS.model).toBe('deepseek/deepseek-v4-flash')
+  })
+
+  it('runs 8 requests at once and ignores the old concurrency setting', () => {
+    expect(MAX_CONCURRENCY).toBe(8)
+    expect(sanitizeSettings({ maxConcurrency: 2 })).toEqual(DEFAULT_SETTINGS)
   })
 
   it('drops settings of removed engines (provider, API keys, endpoint)', () => {

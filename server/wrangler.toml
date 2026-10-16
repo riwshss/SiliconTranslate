@@ -13,6 +13,8 @@ GLOBAL_DAILY_CHARS = "200000000"
 # Single request ceilings.
 MAX_REQUEST_CHARS = "24000"
 MAX_OUTPUT_TOKENS = "8192"
+# OpenRouter routing: providers slower than this (tokens/s, median) are only used as fallbacks.
+MIN_PROVIDER_THROUGHPUT = "50"
 # Shown to OpenRouter for app attribution.
 APP_URL = "https://github.com/riwshss/SiliconTranslate"
 APP_TITLE = "Silk Translate"

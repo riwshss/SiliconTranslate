@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createObjectStreamParser } from '../src/core/stream-json'
 import { createSseParser } from '../src/core/sse'
 import { ConcurrencyPool } from '../src/core/pool'
+import { MAX_BATCH_CHARS, MAX_BATCH_ITEMS, MIN_BATCH_CHARS, splitBatches } from '../src/core/batching'
 import { LruCache } from '../src/core/lru'
 import { guessLanguageByScript, isLikelyInLanguage, shouldTranslateText } from '../src/core/text-filter'
 import { buildBatchMessages } from '../src/core/prompt'
@@ -87,6 +88,36 @@ describe('createSseParser', () => {
     parser.push('ta: [DONE]')
     parser.end()
     expect(seen).toEqual(['{"a":1}', '[DONE]'])
+  })
+})
+
+describe('splitBatches', () => {
+  const texts = (count: number, length: number) => Array.from({ length: count }, (_, i) => String(i).padEnd(length, 'x'))
+  const sizes = (batches: string[][]) => batches.map((b) => b.reduce((sum, t) => sum + t.length, 0))
+
+  it('spreads a screenful over every slot instead of one or two big requests', () => {
+    const batches = splitBatches(texts(24, 150), 8)
+    expect(batches).toHaveLength(8)
+    expect(batches.flat()).toEqual(texts(24, 150))
+  })
+
+  it('does not split below the minimum batch size', () => {
+    const batches = splitBatches(texts(10, 60), 8)
+    expect(batches).toHaveLength(2)
+    expect(sizes(batches)[0]).toBeGreaterThanOrEqual(MIN_BATCH_CHARS)
+  })
+
+  it('respects the per-request ceilings and keeps order', () => {
+    const input = texts(200, 100)
+    const batches = splitBatches(input, 8)
+    expect(batches.flat()).toEqual(input)
+    batches.forEach((batch) => expect(batch.length).toBeLessThanOrEqual(MAX_BATCH_ITEMS))
+    sizes(batches).forEach((size) => expect(size).toBeLessThanOrEqual(MAX_BATCH_CHARS))
+  })
+
+  it('sends an oversized item on its own and handles an empty queue', () => {
+    expect(splitBatches(['a'.repeat(3000), 'b'], 8)).toEqual([['a'.repeat(3000)], ['b']])
+    expect(splitBatches([], 8)).toEqual([])
   })
 })
 

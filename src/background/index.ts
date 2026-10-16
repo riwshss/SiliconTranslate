@@ -10,18 +10,13 @@ import {
   type StreamEvent,
   type StreamRequest,
 } from '../shared/messages'
-import { dropLegacySettings, loadSettings, onSettingsChanged } from '../shared/settings'
+import { dropLegacySettings, loadSettings } from '../shared/settings'
 import { refreshEntitlement } from './account'
-import { pickSelectionLanguage, setConcurrency, streamTextTranslation, translateBatch } from './translator'
+import { pickSelectionLanguage, streamTextTranslation, translateBatch } from './translator'
 
 const MAX_BATCH_ITEMS = 50
 const MAX_ITEM_CHARS = 8000
 const MAX_SELECTION_CHARS = 5000
-
-loadSettings()
-  .then((s) => setConcurrency(s.maxConcurrency))
-  .catch((err) => console.error('[silk] failed to load settings', err))
-onSettingsChanged((next) => setConcurrency(next.maxConcurrency))
 
 chrome.runtime.onInstalled.addListener(() => {
   dropLegacySettings().catch((err) => console.error('[silk] failed to migrate settings', err))
