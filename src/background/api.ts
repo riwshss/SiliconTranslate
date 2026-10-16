@@ -3,8 +3,6 @@ import { createSseParser } from '../core/sse'
 import type { ChatMessage } from '../core/prompt'
 
 export interface ApiConfig {
-  /** Sent as a Bearer token when non-empty. */
-  readonly apiKey: string
   readonly baseUrl: string
   readonly model: string
   /** Extra request headers, e.g. the anonymous install id for the Silk backend. */
@@ -24,7 +22,6 @@ const BASE_DELAY_MS = 800
 const RATE_LIMIT_BASE_DELAY_MS = 2_000
 const MAX_DELAY_MS = 20_000
 const DEFAULT_MAX_TOKENS = 4096
-const LIST_MODELS_TIMEOUT_MS = 10_000
 
 function chatBody(cfg: ApiConfig, messages: ChatMessage[], stream: boolean, opts: ChatOptions) {
   return {
@@ -33,8 +30,6 @@ function chatBody(cfg: ApiConfig, messages: ChatMessage[], stream: boolean, opts
     stream,
     temperature: opts.temperature ?? 0.2,
     max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-    // Qwen3 family thinks by default; translation needs none of it.
-    ...(/qwen3/i.test(cfg.model) ? { enable_thinking: false } : {}),
   }
 }
 
@@ -115,7 +110,6 @@ export async function fetchWithRetry(url: string, init: RequestInit, signal?: Ab
 
 function headers(cfg: ApiConfig): HeadersInit {
   return {
-    ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
     'Content-Type': 'application/json',
     ...cfg.headers,
   }
@@ -145,11 +139,11 @@ export async function* streamChat(cfg: ApiConfig, messages: ChatMessage[], opts:
   if ((res.headers.get('content-type') ?? '').includes('application/json')) {
     const json = parsePayload(await res.text())
     const content = json.choices?.[0]?.message?.content
-    if (typeof content !== 'string') throw new ApiError('bad-response', '缺少 content')
+    if (typeof content !== 'string') throw new ApiError('bad-response', 'missing content')
     yield content
     return
   }
-  if (!res.body) throw new ApiError('bad-response', '空响应')
+  if (!res.body) throw new ApiError('bad-response', 'emptyReply')
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -183,25 +177,4 @@ export async function* streamChat(cfg: ApiConfig, messages: ChatMessage[], opts:
   } finally {
     reader.cancel().catch(() => undefined)
   }
-}
-
-/** Minimal non-streaming completion — used by the connection test. */
-export async function pingModel(cfg: ApiConfig, signal?: AbortSignal): Promise<void> {
-  const res = await fetchWithRetry(
-    `${cfg.baseUrl}/chat/completions`,
-    {
-      method: 'POST',
-      headers: headers(cfg),
-      body: JSON.stringify(chatBody(cfg, [{ role: 'user', content: 'ping' }], false, { maxTokens: 1 })),
-    },
-    signal,
-  )
-  const json = parsePayload(await res.text())
-  if (!json.choices) throw new ApiError('bad-response', '缺少 choices')
-}
-
-export async function listChatModels(cfg: ApiConfig): Promise<string[]> {
-  const res = await fetchWithRetry(`${cfg.baseUrl}/models?type=text&sub_type=chat`, { headers: headers(cfg) }, AbortSignal.timeout(LIST_MODELS_TIMEOUT_MS))
-  const json = (await res.json()) as { data?: Array<{ id?: unknown }> }
-  return (json.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === 'string').slice(0, 300)
 }

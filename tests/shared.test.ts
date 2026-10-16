@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { DEFAULT_SETTINGS, engineId, GOOGLE_TRANSLATE_URL, hostPermissionFor, sanitizeSettings, withDomainRule } from '../src/shared/settings'
+import { describe, expect, it, vi } from 'vitest'
+import { resolveUiLang, translator } from '../src/shared/i18n'
+import { CLOUD_MODELS, DEFAULT_SETTINGS, dropLegacySettings, engineId, sanitizeSettings, withDomainRule } from '../src/shared/settings'
 import { eventToShortcut, isValidShortcut, matchesShortcut } from '../src/shared/shortcut'
-import { chromeAiLanguage, getLanguage, normalizeDetected } from '../src/shared/languages'
+import { getLanguage } from '../src/shared/languages'
 
 const key = (code: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}) => ({
   code,
@@ -21,11 +22,8 @@ describe('sanitizeSettings', () => {
 
   it('validates every field and keeps valid values', () => {
     const result = sanitizeSettings({
-      provider: 'google',
-      apiKey: '  sk-123  ',
-      googleApiKey: ' AIza-1 ',
-      baseUrl: 'https://proxy.example.com/v1/',
-      model: 'deepseek-ai/DeepSeek-V3',
+      model: 'openai/gpt-6-sol',
+      uiLang: 'en',
       targetLang: 'ja',
       defaultMode: 'bilingual',
       bilingualStyle: 'highlight',
@@ -35,11 +33,8 @@ describe('sanitizeSettings', () => {
       domainRules: { 'example.com': 'always', 'bad host!': 'always', 'x.org': 'sometimes' },
     })
     expect(result).toEqual({
-      provider: 'google',
-      apiKey: 'sk-123',
-      googleApiKey: 'AIza-1',
-      baseUrl: 'https://proxy.example.com/v1',
-      model: 'deepseek-ai/DeepSeek-V3',
+      model: 'openai/gpt-6-sol',
+      uiLang: 'en',
       targetLang: 'ja',
       defaultMode: 'bilingual',
       bilingualStyle: 'highlight',
@@ -52,43 +47,45 @@ describe('sanitizeSettings', () => {
 
   it('rejects unsafe or invalid values', () => {
     const result = sanitizeSettings({
-      baseUrl: 'javascript:alert(1)',
       targetLang: 'xx',
       defaultMode: 'original',
       shortcut: 'T',
       maxConcurrency: 99,
-      model: '   ',
-      provider: 'bing',
+      model: 'deepseek-ai/DeepSeek-V3',
+      uiLang: 'fr',
     })
-    expect(result.provider).toBe('cloud')
-    expect(result.baseUrl).toBe(DEFAULT_SETTINGS.baseUrl)
     expect(result.targetLang).toBe('zh-CN')
     expect(result.defaultMode).toBe('overlay')
     expect(result.shortcut).toBe('Alt+T')
     expect(result.maxConcurrency).toBe(4)
     expect(result.model).toBe(DEFAULT_SETTINGS.model)
-    expect(sanitizeSettings({ baseUrl: 'not a url' }).baseUrl).toBe(DEFAULT_SETTINGS.baseUrl)
+    expect(result.uiLang).toBe('auto')
   })
 
-  it('allows plain http only for loopback hosts so the API key never travels in cleartext', () => {
-    expect(sanitizeSettings({ baseUrl: 'http://api.example.com/v1' }).baseUrl).toBe(DEFAULT_SETTINGS.baseUrl)
-    expect(sanitizeSettings({ baseUrl: 'http://127.0.0.1:8080/v1' }).baseUrl).toBe('http://127.0.0.1:8080/v1')
-    expect(sanitizeSettings({ baseUrl: 'http://localhost:3000/v1/' }).baseUrl).toBe('http://localhost:3000/v1')
+  it('offers exactly the three Silk AI models and defaults to the first', () => {
+    expect(CLOUD_MODELS.map((m) => m.id)).toEqual(['anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash'])
+    expect(DEFAULT_SETTINGS.model).toBe('anthropic/claude-haiku-5.5')
   })
 
-  it('hostPermissionFor returns a match pattern only for endpoints not covered by the manifest', () => {
-    expect(hostPermissionFor(DEFAULT_SETTINGS.baseUrl)).toBeNull()
-    expect(hostPermissionFor('https://api.siliconflow.com/v1')).toBe('https://api.siliconflow.com/*')
-    expect(hostPermissionFor('http://127.0.0.1:8080/v1')).toBeNull()
-    expect(hostPermissionFor('http://evil.example.com/v1')).toBeNull()
-    expect(hostPermissionFor(GOOGLE_TRANSLATE_URL)).toBe('https://translation.googleapis.com/*')
+  it('drops settings of removed engines (provider, API keys, endpoint)', () => {
+    const result = sanitizeSettings({ provider: 'openai', apiKey: 'sk-1', googleApiKey: 'AIza', baseUrl: 'https://x.test/v1', model: 'google/gemini-3.8-flash' })
+    expect(result).toEqual({ ...DEFAULT_SETTINGS, model: 'google/gemini-3.8-flash' })
   })
 
-  it('engineId separates cached translations per engine and model', () => {
-    expect(engineId(DEFAULT_SETTINGS)).toBe('cloud')
-    expect(engineId({ ...DEFAULT_SETTINGS, provider: 'openai' })).toBe(`openai:${DEFAULT_SETTINGS.model}`)
-    expect(engineId({ ...DEFAULT_SETTINGS, provider: 'google', model: 'x' })).toBe('google')
-    expect(engineId({ ...DEFAULT_SETTINGS, provider: 'chrome-nano' })).toBe('chrome-nano')
+  it('dropLegacySettings removes stored API keys once and leaves clean settings untouched', async () => {
+    const store: Record<string, unknown> = { settings: { provider: 'openai', apiKey: 'sk-1', targetLang: 'ja' } }
+    const set = vi.fn(async (items: Record<string, unknown>) => Object.assign(store, items))
+    vi.stubGlobal('chrome', { storage: { local: { get: async (key: string) => ({ [key]: store[key] }), set } } })
+    await dropLegacySettings()
+    expect(store.settings).toEqual({ ...DEFAULT_SETTINGS, targetLang: 'ja' })
+    await dropLegacySettings()
+    expect(set).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('engineId separates cached translations per model', () => {
+    expect(engineId(DEFAULT_SETTINGS)).toBe('cloud:anthropic/claude-haiku-5.5')
+    expect(engineId({ ...DEFAULT_SETTINGS, model: 'openai/gpt-6-sol' })).toBe('cloud:openai/gpt-6-sol')
   })
 
   it('withDomainRule adds, replaces and removes rules immutably', () => {
@@ -132,13 +129,18 @@ describe('languages', () => {
     expect(getLanguage('??').code).toBe('zh-CN')
   })
 
-  it('maps codes to and from Chrome built-in AI language tags', () => {
-    expect(chromeAiLanguage('zh-CN')).toBe('zh')
-    expect(chromeAiLanguage('zh-TW')).toBe('zh-Hant')
-    expect(chromeAiLanguage('ja')).toBe('ja')
-    expect(normalizeDetected('und')).toBeNull()
-    expect(normalizeDetected('zh-CN')).toBe('zh')
-    expect(normalizeDetected('zh-Hant')).toBe('zh-Hant')
-    expect(normalizeDetected('pt-BR')).toBe('pt')
+})
+
+describe('i18n', () => {
+  it('follows the browser for auto: Chinese locales get Chinese, everything else English', () => {
+    expect(resolveUiLang('auto', 'zh-TW')).toBe('zh-CN')
+    expect(resolveUiLang('auto', 'en-US')).toBe('en')
+    expect(resolveUiLang('auto', 'ja')).toBe('en')
+    expect(resolveUiLang('en', 'zh-CN')).toBe('en')
+  })
+
+  it('fills placeholders', () => {
+    expect(translator('en')('pageTranslating', { done: 3, total: 9 })).toBe('Translating 3/9')
+    expect(translator('zh-CN')('pageFailed', { n: 2 })).toBe('2 段失败')
   })
 })

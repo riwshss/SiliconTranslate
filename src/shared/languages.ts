@@ -30,18 +30,3 @@ export function getLanguage(code: string): Language {
 export function isKnownLanguage(code: unknown): code is string {
   return typeof code === 'string' && LANGUAGES.some((lang) => lang.code === code)
 }
-
-/** Chrome's Translator API names Chinese `zh` (Simplified) and `zh-Hant`. */
-export function chromeAiLanguage(code: string): string {
-  if (code === 'zh-CN') return 'zh'
-  if (code === 'zh-TW') return 'zh-Hant'
-  return code
-}
-
-/** Normalizes a LanguageDetector / tabs.detectLanguage result to a Translator API code. */
-export function normalizeDetected(code: string): string | null {
-  const lower = code.toLowerCase()
-  if (!lower || lower === 'und') return null
-  if (lower === 'zh-hant' || lower === 'zh-tw' || lower === 'zh-hk') return 'zh-Hant'
-  return lower.split('-')[0]
-}

@@ -11,7 +11,7 @@ const outdir = process.env.SILK_OUTDIR || 'dist'
 const apiUrl = parseApiUrl(process.env.SILK_API_URL || DEFAULT_API_URL)
 const channel = process.env.SILK_CHANNEL === 'stable' ? 'stable' : 'beta'
 
-/** https anywhere, plain http only on loopback (same rule as user-configured endpoints). */
+/** https anywhere, plain http only on loopback (local `wrangler dev` / E2E mock). */
 function parseApiUrl(value) {
   const url = new URL(value)
   const isLoopback = ['localhost', '127.0.0.1'].includes(url.hostname)
@@ -38,7 +38,6 @@ const configs = [
   { ...shared, entryPoints: { background: 'src/background/index.ts' }, outdir, format: 'esm' },
   { ...shared, entryPoints: { content: 'src/content/index.ts' }, outdir, format: 'iife' },
   { ...shared, entryPoints: { popup: 'src/popup/popup.ts' }, outdir, format: 'iife' },
-  { ...shared, entryPoints: { offscreen: 'src/offscreen/index.ts' }, outdir, format: 'iife' },
 ]
 
 /** The backend origin must be a host permission; beta builds say so in their name. */
@@ -56,7 +55,6 @@ function copyStatic() {
   cpSync('static', outdir, { recursive: true })
   cpSync('src/popup/popup.html', `${outdir}/popup.html`)
   cpSync('src/popup/popup.css', `${outdir}/popup.css`)
-  cpSync('src/offscreen/offscreen.html', `${outdir}/offscreen.html`)
   writeManifest()
 }
 

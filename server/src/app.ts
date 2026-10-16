@@ -1,13 +1,13 @@
 // Request handling for the Silk Translate backend, kept free of Cloudflare imports so it can be
 // unit-tested in Node. The extension sends an anonymous install id; every AI request is checked
 // against daily quotas (per install, per client IP, and a global wallet guard) and forwarded to
-// OpenRouter with the server-side key and model. The key never reaches the client.
+// OpenRouter with the server-side key. The client picks one of MODELS; anything else is refused.
+// The key never reaches the client.
 
 import type { QuotaResult } from './quota'
 
 export interface Env {
   readonly OPENROUTER_API_KEY: string
-  readonly OPENROUTER_MODEL: string
   readonly INSTALL_DAILY_CHARS: string
   readonly IP_DAILY_CHARS: string
   readonly GLOBAL_DAILY_CHARS: string
@@ -32,6 +32,9 @@ export interface Deps {
 export type Plan = 'beta' | 'free' | 'pro'
 const CURRENT_PLAN: Plan = 'beta'
 const PLAN_FEATURES: Record<Plan, readonly string[]> = { beta: ['cloud-ai'], free: [], pro: ['cloud-ai'] }
+
+/** OpenRouter ids the extension may ask for (src/shared/settings.ts CLOUD_MODELS); the first is the default. */
+export const MODELS: readonly string[] = ['anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash']
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const INSTALL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -79,13 +82,14 @@ function limitOf(value: string, fallback: number): number {
 }
 
 export interface ChatRequest {
+  readonly model: string
   readonly messages: ReadonlyArray<{ role: string; content: string }>
   readonly stream: boolean
   readonly temperature: number
   readonly maxTokens: number
 }
 
-/** Validates the client body; only messages and a few sampling knobs are kept (model is server-chosen). */
+/** Validates the client body; keeps the model (allowlisted, default when absent), messages and a few sampling knobs. */
 export function parseChatRequest(raw: unknown, maxOutputTokens: number): ChatRequest | null {
   if (!raw || typeof raw !== 'object') return null
   const body = raw as Record<string, unknown>
@@ -95,9 +99,11 @@ export function parseChatRequest(raw: unknown, maxOutputTokens: number): ChatReq
     (m) => !!m && typeof m === 'object' && ROLES.has((m as { role: unknown }).role as string) && typeof (m as { content: unknown }).content === 'string',
   )
   if (!isValid) return null
+  if (body.model !== undefined && !MODELS.includes(body.model as string)) return null
   const temperature = Number(body.temperature)
   const maxTokens = Number(body.max_tokens)
   return {
+    model: (body.model as string | undefined) ?? MODELS[0],
     messages: messages.map((m) => ({ role: m.role as string, content: m.content as string })),
     stream: body.stream === true,
     temperature: Number.isFinite(temperature) ? Math.min(Math.max(temperature, 0), 1) : 0.2,
@@ -125,7 +131,7 @@ function quotaMeta(q: QuotaResult) {
 async function handleEntitlement(request: Request, env: Env, deps: Deps): Promise<Response> {
   const id = installId(request)
   if (!id) return fail(401, 'unauthorized', 'Missing or invalid install id')
-  const quota = await deps.quota.peek(`install:${id}`, limitOf(env.INSTALL_DAILY_CHARS, 200_000))
+  const quota = await deps.quota.peek(`install:${id}`, limitOf(env.INSTALL_DAILY_CHARS, 2_000_000))
   return ok({ plan: CURRENT_PLAN, features: PLAN_FEATURES[CURRENT_PLAN], quota: quotaMeta(quota) })
 }
 
@@ -165,9 +171,9 @@ async function handleChat(request: Request, env: Env, deps: Deps): Promise<Respo
   const maxTokens = Math.min(chat.maxTokens, textChars * OUTPUT_TOKENS_PER_CHAR + OUTPUT_TOKENS_BASE)
 
   const counters: Array<[string, number]> = [
-    [`install:${id}`, limitOf(env.INSTALL_DAILY_CHARS, 200_000)],
-    [`ip:${clientIp(request)}`, limitOf(env.IP_DAILY_CHARS, 600_000)],
-    ['global', limitOf(env.GLOBAL_DAILY_CHARS, 20_000_000)],
+    [`install:${id}`, limitOf(env.INSTALL_DAILY_CHARS, 2_000_000)],
+    [`ip:${clientIp(request)}`, limitOf(env.IP_DAILY_CHARS, 6_000_000)],
+    ['global', limitOf(env.GLOBAL_DAILY_CHARS, 200_000_000)],
   ]
   const exhausted = await spend(deps, chars, counters)
   if (exhausted) return fail(429, 'quota_exceeded', 'Daily free quota used up', quotaMeta(exhausted))
@@ -182,7 +188,7 @@ async function handleChat(request: Request, env: Env, deps: Deps): Promise<Respo
         'X-Title': env.APP_TITLE,
       },
       body: JSON.stringify({
-        model: env.OPENROUTER_MODEL,
+        model: chat.model,
         messages: chat.messages,
         stream: chat.stream,
         temperature: chat.temperature,

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>丝译</title>
+    <title>丝译 Silk Translate</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
@@ -12,11 +12,11 @@
         <div class="brand">
           <img class="logo" src="icons/icon-128.png" alt="" width="34" height="34" />
           <div>
-            <h1>丝译 <span id="beta-badge" class="badge">Beta</span></h1>
-            <p>无痕网页翻译 · 云端 / 本地多引擎</p>
+            <h1><span data-i18n="appName"></span> <span id="beta-badge" class="badge">Beta</span></h1>
+            <p data-i18n="tagline"></p>
           </div>
         </div>
-        <span id="conn" class="pill" data-state="idle">未配置</span>
+        <span id="conn" class="pill" data-state="idle"></span>
       </header>
 
       <section class="card" id="page-card">
@@ -26,115 +26,79 @@
         </div>
         <button id="translate-btn" class="primary" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
-          <span>翻译此页</span>
+          <span data-i18n="translatePage"></span>
         </button>
-        <div id="mode-seg" class="seg seg-lg" role="radiogroup" aria-label="显示模式" hidden>
-          <button type="button" role="radio" data-value="original">原文</button>
-          <button type="button" role="radio" data-value="overlay">仅译文</button>
-          <button type="button" role="radio" data-value="bilingual">双语对照</button>
+        <div id="mode-seg" class="seg seg-lg" role="radiogroup" data-i18n-aria="displayMode" hidden>
+          <button type="button" role="radio" data-value="original" data-i18n="modeOriginal"></button>
+          <button type="button" role="radio" data-value="overlay" data-i18n="modeOverlayOnly"></button>
+          <button type="button" role="radio" data-value="bilingual" data-i18n="modeBilingual"></button>
         </div>
         <div class="row between">
-          <span class="label">此网站</span>
-          <div id="rule-seg" class="seg seg-sm" role="radiogroup" aria-label="网站规则">
-            <button type="button" role="radio" data-value="">默认</button>
-            <button type="button" role="radio" data-value="always">总是翻译</button>
-            <button type="button" role="radio" data-value="never">从不</button>
+          <span class="label" data-i18n="thisSite"></span>
+          <div id="rule-seg" class="seg seg-sm" role="radiogroup" data-i18n-aria="siteRules">
+            <button type="button" role="radio" data-value="" data-i18n="ruleDefault"></button>
+            <button type="button" role="radio" data-value="always" data-i18n="ruleAlways"></button>
+            <button type="button" role="radio" data-value="never" data-i18n="ruleNever"></button>
           </div>
         </div>
         <p id="page-note" class="note" hidden></p>
       </section>
 
       <section class="card">
-        <h2>翻译偏好</h2>
-        <label class="field">
-          <span>目标语言</span>
-          <select id="lang"></select>
-        </label>
-        <div class="field">
-          <span>默认模式</span>
-          <div id="default-mode" class="seg seg-sm" role="radiogroup" aria-label="默认模式">
-            <button type="button" role="radio" data-value="overlay">覆盖原文</button>
-            <button type="button" role="radio" data-value="bilingual">双语对照</button>
-          </div>
+        <h2 data-i18n="modelTitle"></h2>
+        <div id="models" class="models" role="radiogroup" data-i18n-aria="modelLabel"></div>
+        <p class="hint" data-i18n="modelNote"></p>
+        <div class="row">
+          <button id="test-btn" class="secondary" type="button" data-i18n="checkQuota"></button>
+          <span id="test-result" class="small" aria-live="polite"></span>
         </div>
-        <div class="field">
-          <span>双语样式</span>
-          <div id="style-seg" class="seg seg-sm" role="radiogroup" aria-label="双语样式">
-            <button type="button" role="radio" data-value="dashed"><u class="demo-dashed">虚线</u></button>
-            <button type="button" role="radio" data-value="highlight"><mark class="demo-mark">高亮</mark></button>
-          </div>
-        </div>
-        <label class="field">
-          <span>划词翻译</span>
-          <span class="switch"><input id="selection" type="checkbox" /><i></i></span>
-        </label>
-        <div class="field">
-          <span>切换快捷键</span>
-          <button id="shortcut" class="kbd-btn" type="button" title="点击后按下新的组合键"></button>
-        </div>
-        <p class="hint">快捷键循环：原文 → 默认模式 → 另一种模式</p>
       </section>
 
       <section class="card">
-        <h2>翻译服务</h2>
-        <label class="stack">
-          <span>翻译引擎</span>
-          <select id="provider"></select>
+        <h2 data-i18n="prefsTitle"></h2>
+        <label class="field">
+          <span data-i18n="targetLang"></span>
+          <select id="lang"></select>
         </label>
-
-        <div id="openai-group" class="group">
-          <label class="stack">
-            <span>API Key</span>
-            <div class="input-wrap">
-              <input id="api-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false" />
-              <button class="ghost-icon toggle-key" type="button" aria-label="显示/隐藏密钥">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
-              </button>
-            </div>
-          </label>
-          <label class="stack">
-            <span>模型</span>
-            <select id="model-select"></select>
-          </label>
-          <input id="model-custom" class="text" list="model-list" placeholder="输入模型名称，如 Qwen/Qwen2.5-7B-Instruct" spellcheck="false" hidden />
-          <datalist id="model-list"></datalist>
+        <div class="field">
+          <span data-i18n="defaultMode"></span>
+          <div id="default-mode" class="seg seg-sm" role="radiogroup" data-i18n-aria="defaultMode">
+            <button type="button" role="radio" data-value="overlay" data-i18n="modeOverlay"></button>
+            <button type="button" role="radio" data-value="bilingual" data-i18n="modeBilingual"></button>
+          </div>
         </div>
-
-        <div id="google-group" class="group" hidden>
-          <label class="stack">
-            <span>Google Cloud API Key</span>
-            <div class="input-wrap">
-              <input id="google-key" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false" />
-              <button class="ghost-icon toggle-key" type="button" aria-label="显示/隐藏密钥">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
-              </button>
-            </div>
-          </label>
-          <p class="hint">需在 Google Cloud 控制台启用 Cloud Translation API。按字符计费，每月前 50 万字符免费。密钥不要设置「HTTP 引荐来源」限制。</p>
+        <div class="field">
+          <span data-i18n="bilingualStyle"></span>
+          <div id="style-seg" class="seg seg-sm" role="radiogroup" data-i18n-aria="bilingualStyle">
+            <button type="button" role="radio" data-value="dashed"><u class="demo-dashed" data-i18n="styleDashed"></u></button>
+            <button type="button" role="radio" data-value="highlight"><mark class="demo-mark" data-i18n="styleHighlight"></mark></button>
+          </div>
         </div>
-
-        <p id="chrome-note" class="hint" hidden></p>
-
-        <div class="row">
-          <button id="test-btn" class="secondary" type="button">测试连接</button>
-          <span id="test-result" class="small" aria-live="polite"></span>
+        <label class="field">
+          <span data-i18n="selection"></span>
+          <span class="switch"><input id="selection" type="checkbox" /><i></i></span>
+        </label>
+        <div class="field">
+          <span data-i18n="shortcut"></span>
+          <button id="shortcut" class="kbd-btn" type="button" data-i18n-title="shortcutTitle"></button>
         </div>
+        <p class="hint" data-i18n="shortcutHint"></p>
+        <label class="field">
+          <span data-i18n="uiLanguage"></span>
+          <select id="ui-lang"></select>
+        </label>
         <details>
-          <summary>高级设置</summary>
-          <label id="base-url-field" class="stack">
-            <span>API 地址</span>
-            <input id="base-url" class="text" spellcheck="false" />
-          </label>
+          <summary data-i18n="advanced"></summary>
           <label class="field">
-            <span>最大并发请求</span>
+            <span data-i18n="concurrency"></span>
             <input id="concurrency" class="num" type="number" min="1" max="8" step="1" />
           </label>
         </details>
       </section>
 
       <footer>
-        <a id="help-link" href="https://github.com/riwshss/SiliconTranslate#readme" target="_blank" rel="noreferrer">使用说明 ↗</a>
-        <span id="saved" class="saved">已保存</span>
+        <a href="https://github.com/riwshss/SiliconTranslate#readme" target="_blank" rel="noreferrer" data-i18n="help"></a>
+        <span id="saved" class="saved" data-i18n="saved"></span>
       </footer>
     </main>
     <script src="popup.js"></script>

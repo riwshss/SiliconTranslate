@@ -1,5 +1,7 @@
 export interface Segmented {
   setValue(value: string): void
+  /** Re-measures the thumb after the button labels changed (interface language switch). */
+  repaint(): void
 }
 
 /** Wires a `.seg` radiogroup: sliding thumb, aria-checked, keyboard arrows. */
@@ -49,6 +51,13 @@ export function segmented(root: HTMLElement, onChange: (value: string) => void):
       requestAnimationFrame(() => {
         paint()
         if (isFirst) requestAnimationFrame(() => root.classList.remove('no-anim'))
+      })
+    },
+    repaint() {
+      root.classList.add('no-anim')
+      requestAnimationFrame(() => {
+        paint()
+        requestAnimationFrame(() => root.classList.remove('no-anim'))
       })
     },
   }

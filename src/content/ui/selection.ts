@@ -1,3 +1,4 @@
+import type { Translate } from '../../shared/i18n'
 import { PORT_STREAM, type StreamEvent, type StreamRequest } from '../../shared/messages'
 import { html, type UiHost } from './host'
 import { ICONS } from './icons'
@@ -36,15 +37,15 @@ async function copyText(text: string): Promise<void> {
 }
 
 /** Selection → small trigger icon → streamed translation card (all inside the shadow UI). */
-export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean): void {
-  const trigger = html(`<button class="trigger glass" hidden title="翻译选中内容" aria-label="翻译选中内容">${ICONS.translate}</button>`)
+export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, getT: () => Translate): void {
+  const trigger = html(`<button class="trigger glass" hidden>${ICONS.translate}</button>`)
   const card = html(`
-    <div class="card glass" hidden role="dialog" aria-label="划词翻译">
+    <div class="card glass" hidden role="dialog">
       <div class="card-head">
-        <span class="chip">翻译中…</span>
-        <button class="icon-btn copy" title="复制译文" aria-label="复制译文">${ICONS.copy}</button>
-        <button class="icon-btn speak" title="朗读译文" aria-label="朗读译文">${ICONS.speak}</button>
-        <button class="icon-btn close" title="关闭 (Esc)" aria-label="关闭">${ICONS.close}</button>
+        <span class="chip"></span>
+        <button class="icon-btn copy">${ICONS.copy}</button>
+        <button class="icon-btn speak">${ICONS.speak}</button>
+        <button class="icon-btn close">${ICONS.close}</button>
       </div>
       <div class="source"></div>
       <div class="result" aria-live="polite"></div>
@@ -56,6 +57,21 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean):
   const result = card.querySelector('.result') as HTMLElement
   const copyBtn = card.querySelector('.copy') as HTMLButtonElement
   const speakBtn = card.querySelector('.speak') as HTMLButtonElement
+  const closeBtn = card.querySelector('.close') as HTMLButtonElement
+
+  /** Labels follow the interface language, which may change while the page is open. */
+  const applyLabels = () => {
+    const t = getT()
+    const label = (el: HTMLElement, title: string, aria = title) => {
+      el.title = title
+      el.setAttribute('aria-label', aria)
+    }
+    label(trigger, t('selTrigger'))
+    card.setAttribute('aria-label', t('selCard'))
+    label(copyBtn, t('copy'))
+    label(speakBtn, t('speak'))
+    label(closeBtn, t('closeTitle'), t('close'))
+  }
 
   let selectedText = ''
   let anchorRect: DOMRect | null = null
@@ -76,6 +92,7 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean):
 
   const showTrigger = (at: Point) => {
     ui.ensureAttached()
+    applyLabels()
     trigger.style.left = `${clamp(at.x + 8, EDGE, innerWidth - 30 - EDGE)}px`
     trigger.style.top = `${clamp(at.y + 10, EDGE, innerHeight - 30 - EDGE)}px`
     trigger.hidden = false
@@ -119,7 +136,8 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean):
     hideTrigger()
     port?.disconnect()
     translated = ''
-    chip.textContent = '翻译中…'
+    applyLabels()
+    chip.textContent = getT()('selTranslating')
     source.textContent = selectedText
     result.classList.remove('is-error')
     result.replaceChildren(html('<div class="skeleton"><i></i><i></i></div>'))
@@ -128,12 +146,12 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean):
     try {
       port = chrome.runtime.connect({ name: PORT_STREAM })
     } catch {
-      showError('扩展已更新，请刷新页面后再试')
+      showError(getT()('extensionGone'))
       return
     }
     port.onMessage.addListener(handleEvent)
     port.onDisconnect.addListener(() => {
-      if (port && !translated) showError('与扩展后台的连接中断，请重试')
+      if (port && !translated) showError(getT()('portLost'))
       port = null
     })
     const request: StreamRequest = { text: selectedText }
@@ -143,7 +161,7 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean):
   // Keep the page selection alive when pressing our button.
   trigger.addEventListener('mousedown', (e) => e.preventDefault())
   trigger.addEventListener('click', openCard)
-  card.querySelector('.close')?.addEventListener('click', closeCard)
+  closeBtn.addEventListener('click', closeCard)
   copyBtn.addEventListener('click', async () => {
     if (!translated) return
     await copyText(translated)

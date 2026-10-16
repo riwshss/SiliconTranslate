@@ -1,6 +1,6 @@
-// Fake OpenAI-compatible endpoint for E2E: streams deterministic "translations", answers the first
-// batch with 429 to exercise backoff, and records concurrency. Requests carrying X-Silk-Install
-// play the Silk backend (cloud engine): no API key, /v1/entitlement, and a switchable quota.
+// Fake Silk backend for E2E: streams deterministic "translations", answers the first batch with
+// 429 to exercise backoff, and records concurrency. Every request must carry X-Silk-Install and no
+// API key; /v1/entitlement reports the plan, and the quota can be switched to exhausted.
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 
@@ -9,8 +9,8 @@ const CHUNK = 9
 const CHUNK_DELAY_MS = 12
 
 export const stats = { batchRequests: 0, items: 0, textRequests: 0, rateLimited: 0, active: 0, peak: 0, keys: new Set() }
-/** Silk backend side: requests seen, install ids, and a switch that makes every request over quota. */
-export const cloud = { requests: 0, quotaHits: 0, installIds: new Set(), withAuthorization: 0, isQuotaExhausted: false }
+/** Silk backend side: requests seen, install ids, models asked for, and a switch that makes every request over quota. */
+export const cloud = { requests: 0, quotaHits: 0, installIds: new Set(), models: [], withAuthorization: 0, isQuotaExhausted: false }
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const JSON_CORS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
 
@@ -67,24 +67,20 @@ function acceptCloud(req, res) {
 
 function handleEntitlement(req, res) {
   if (!acceptCloud(req, res)) return
-  const quota = { used: cloud.isQuotaExhausted ? 200000 : 1234, limit: 200000, resetAt: '2026-10-18T00:00:00.000Z' }
+  const quota = { used: cloud.isQuotaExhausted ? 2000000 : 1234, limit: 2000000, resetAt: '2026-10-18T00:00:00.000Z' }
   res.writeHead(200, JSON_CORS)
   res.end(JSON.stringify({ success: true, data: { plan: 'beta', features: ['cloud-ai'], quota }, error: null, meta: null }))
 }
 
 async function handleChat(req, res) {
   const body = JSON.parse(await readBody(req))
-  if (req.headers['x-silk-install']) {
-    if (!acceptCloud(req, res)) return
-    cloud.requests++
-    if (cloud.isQuotaExhausted) {
-      cloud.quotaHits++
-      res.writeHead(429, { ...JSON_CORS, 'X-Silk-Error': 'quota_exceeded' })
-      return res.end(JSON.stringify({ success: false, data: null, error: { code: 'quota_exceeded', message: 'Daily free quota used up' } }))
-    }
-  } else if (req.headers.authorization !== 'Bearer sk-test') {
-    res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
-    return res.end(JSON.stringify({ message: 'Invalid token' }))
+  if (!acceptCloud(req, res)) return
+  cloud.requests++
+  cloud.models.push(body.model)
+  if (cloud.isQuotaExhausted) {
+    cloud.quotaHits++
+    res.writeHead(429, { ...JSON_CORS, 'X-Silk-Error': 'quota_exceeded' })
+    return res.end(JSON.stringify({ success: false, data: null, error: { code: 'quota_exceeded', message: 'Daily free quota used up' } }))
   }
   if (!body.stream) {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
@@ -121,7 +117,7 @@ export function startMockServer(port = 0) {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, content-type, x-silk-install',
+        'Access-Control-Allow-Headers': 'content-type, x-silk-install',
         'Access-Control-Allow-Methods': 'GET, POST',
       })
       return res.end()
@@ -131,10 +127,6 @@ export function startMockServer(port = 0) {
       return res.end(FIXTURE)
     }
     if (req.url === '/v1/entitlement' && req.method === 'GET') return handleEntitlement(req, res)
-    if (req.url.startsWith('/v1/models')) {
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
-      return res.end(JSON.stringify({ data: [{ id: 'mock/model-a' }, { id: 'mock/model-b' }] }))
-    }
     if (req.url === '/v1/chat/completions' && req.method === 'POST') {
       return handleChat(req, res).catch((err) => {
         console.error(err)

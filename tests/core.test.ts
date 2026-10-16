@@ -192,9 +192,16 @@ describe('errors', () => {
   it('maps unknown errors to friendly ApiErrors', () => {
     expect(toApiError(new DOMException('x', 'AbortError')).code).toBe('aborted')
     expect(toApiError(new Error('boom')).message).toContain('boom')
-    const err = new ApiError('auth')
+    const err = new ApiError('quota')
     expect(toApiError(err)).toBe(err)
-    expect(err.toWire()).toEqual({ code: 'auth', message: 'API Key 无效或已过期' })
+    expect(err.toWire('zh-CN')).toEqual({ code: 'quota', message: '今日免费额度已用完，北京时间早上 8 点（UTC 0 点）恢复' })
+    expect(err.toWire('en').message).toBe("Today's free quota is used up. It resets at 00:00 UTC")
+  })
+
+  it('translates details that are message keys and keeps raw server text as is', () => {
+    expect(new ApiError('bad-response', 'missedItems').text('en')).toBe("Couldn't read the model's reply: The model skipped some paragraphs")
+    expect(new ApiError('bad-response', 'missedItems').text('zh-CN')).toBe('模型返回内容无法解析：模型漏译了部分段落')
+    expect(new ApiError('bad-request', 'Invalid chat request').text('zh-CN')).toBe('请求被拒绝：Invalid chat request')
   })
 })
 

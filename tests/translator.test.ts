@@ -23,7 +23,7 @@ const { translateBatch, plainReply, looksTruncated } = await import('../src/back
 
 let settingsId = 0
 /** A fresh model name per test keeps the module-level translation cache from leaking between tests. */
-const settings = (): Settings => ({ ...DEFAULT_SETTINGS, provider: 'openai', apiKey: 'sk-test', model: `test/model-${++settingsId}` })
+const settings = (): Settings => ({ ...DEFAULT_SETTINGS, model: `test/model-${++settingsId}` })
 
 async function translate(texts: string[], withSettings: Settings = settings()) {
   const items: Record<number, string> = {}
@@ -34,9 +34,21 @@ async function translate(texts: string[], withSettings: Settings = settings()) {
 const json = (batch: Record<string, string>, fn: (text: string) => string) =>
   JSON.stringify(Object.fromEntries(Object.entries(batch).map(([k, v]) => [k, fn(v)])))
 
+/** chrome.storage stand-in: the engine keeps the install id and cached plan there. */
+let store: Record<string, unknown>
+
 beforeEach(() => {
   calls = []
   configs = []
+  store = {}
+  vi.stubGlobal('chrome', {
+    storage: {
+      local: {
+        get: async (key: string) => (key in store ? { [key]: store[key] } : {}),
+        set: async (items: Record<string, unknown>) => Object.assign(store, items),
+      },
+    },
+  })
 })
 
 describe('translateBatch retries', () => {
@@ -111,39 +123,28 @@ describe('translator helpers', () => {
 })
 
 describe('Silk AI cloud engine', () => {
-  let store: Record<string, unknown>
-  /** Fresh text per test: cloud translations share one cache key prefix ("cloud"). */
+  /** Fresh text per test: these tests share the default model's cache key prefix. */
   let textId = 0
   const cloudText = () => `cloud text ${++textId}`
 
-  beforeEach(() => {
-    store = {}
-    vi.stubGlobal('chrome', {
-      storage: {
-        local: {
-          get: async (key: string) => (key in store ? { [key]: store[key] } : {}),
-          set: async (items: Record<string, unknown>) => Object.assign(store, items),
-        },
-      },
-    })
-  })
-
-  it('calls the Silk backend with an anonymous install id instead of an API key', async () => {
+  it('calls the Silk backend with an anonymous install id and the chosen model', async () => {
     model = (batch) => [json(batch, (t) => `译:${t}`)]
     const text = cloudText()
-    const { items } = await translate([text], { ...DEFAULT_SETTINGS, provider: 'cloud' })
+    const { items } = await translate([text], { ...DEFAULT_SETTINGS, model: 'openai/gpt-6-sol' })
     expect(items).toEqual({ 0: `译:${text}` })
-    expect(configs[0].apiKey).toBe('')
+    expect(configs[0].model).toBe('openai/gpt-6-sol')
     expect(configs[0].baseUrl).toMatch(/\/v1$/)
     expect(configs[0].headers?.['X-Silk-Install']).toMatch(/^[0-9a-f-]{36}$/)
-    expect(store.installId).toBe(configs[0].headers?.['X-Silk-Install'])
+    // Earlier tests already created the (memoized) install id: every request reuses it.
+    await translate([cloudText()])
+    expect(configs[1].headers?.['X-Silk-Install']).toBe(configs[0].headers?.['X-Silk-Install'])
   })
 
   it('treats a used-up daily quota as final: no per-item retries', async () => {
     model = () => {
       throw new ApiError('quota')
     }
-    const { outcome } = await translate([cloudText(), cloudText()], { ...DEFAULT_SETTINGS, provider: 'cloud' })
+    const { outcome } = await translate([cloudText(), cloudText()], DEFAULT_SETTINGS)
     expect(outcome.failed).toEqual([0, 1])
     expect(outcome.error?.code).toBe('quota')
     expect(calls).toHaveLength(1)
@@ -153,7 +154,7 @@ describe('Silk AI cloud engine', () => {
     store.entitlement = { plan: 'free', features: [], quota: null }
     model = (batch) => [json(batch, (t) => t)]
     // Like a missing key, a missing plan is a setup error: it rejects and the port reports every item failed.
-    await expect(translate([cloudText()], { ...DEFAULT_SETTINGS, provider: 'cloud' })).rejects.toMatchObject({ code: 'upgrade' })
+    await expect(translate([cloudText()], DEFAULT_SETTINGS)).rejects.toMatchObject({ code: 'upgrade' })
     expect(calls).toHaveLength(0)
   })
 })

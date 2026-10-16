@@ -1,9 +1,9 @@
 {
   "name": "silk-translate",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
-  "description": "丝译 — 内置 Silk AI 云端翻译（OpenRouter），并支持 Google 翻译、Chrome 本地模型与自定义 AI 接口的网页翻译扩展",
+  "description": "丝译 Silk Translate — Silk AI 云端网页翻译扩展（Claude Haiku 5.5 / GPT-6 Sol / Gemini 3.8 Flash），中英文界面",
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --watch",

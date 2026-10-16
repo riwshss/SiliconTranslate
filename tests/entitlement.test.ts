@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canUseProvider, defaultEntitlement, describeQuota, requiredFeature, sanitizeEntitlement } from '../src/shared/entitlement'
+import { canUseCloudAi, defaultEntitlement, describeQuota, sanitizeEntitlement } from '../src/shared/entitlement'
 
 describe('entitlement', () => {
   it('unlocks cloud AI by default in beta builds but not in stable builds', () => {
@@ -7,14 +7,9 @@ describe('entitlement', () => {
     expect(defaultEntitlement('stable').features).toEqual([])
   })
 
-  it('gates only the paid cloud engine; engines on the user own key or device stay free', () => {
-    const free = defaultEntitlement('stable')
-    expect(requiredFeature('cloud')).toBe('cloud-ai')
-    expect(canUseProvider(free, 'cloud')).toBe(false)
-    expect(canUseProvider(defaultEntitlement('beta'), 'cloud')).toBe(true)
-    for (const provider of ['openai', 'google', 'chrome-translator', 'chrome-nano'] as const) {
-      expect(canUseProvider(free, provider)).toBe(true)
-    }
+  it('gates the cloud engine on the cloud-ai feature', () => {
+    expect(canUseCloudAi(defaultEntitlement('stable'))).toBe(false)
+    expect(canUseCloudAi(defaultEntitlement('beta'))).toBe(true)
   })
 
   it('accepts a well-formed server answer and drops unknown features', () => {
@@ -28,8 +23,9 @@ describe('entitlement', () => {
     expect(sanitizeEntitlement({ plan: 'beta', features: 'cloud-ai', quota: { used: 'x' } })).toEqual({ plan: 'beta', features: [], quota: null })
   })
 
-  it('summarises quota in 万 above ten thousand characters', () => {
-    expect(describeQuota({ used: 800, limit: 200000, resetAt: '' })).toBe('今日已用 800 / 20 万字')
-    expect(describeQuota({ used: 12345, limit: 200000, resetAt: '' })).toBe('今日已用 1.2 万 / 20 万字')
+  it('summarises quota compactly in the interface language', () => {
+    expect(describeQuota({ used: 800, limit: 2_000_000, resetAt: '' }, 'zh-CN')).toBe('今日已用 800 / 200万 字')
+    expect(describeQuota({ used: 12345, limit: 2_000_000, resetAt: '' }, 'zh-CN')).toBe('今日已用 1.2万 / 200万 字')
+    expect(describeQuota({ used: 12345, limit: 2_000_000, resetAt: '' }, 'en')).toBe('Used today: 12.3K / 2M characters')
   })
 })

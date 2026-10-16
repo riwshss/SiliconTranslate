@@ -3,12 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildTranslationFragment,
   computeOverlayPlan,
-  fromGoogleHtml,
   keepsFormattingMarkers,
   parseMarkup,
   serializeRun,
   stripMarkup,
-  toGoogleHtml,
   type Classify,
 } from '../src/core/markup'
 
@@ -155,14 +153,5 @@ describe('engine adapters', () => {
     expect(keepsFormattingMarkers('Click <g0>here</g0> <c1/>', '点击<g0>这里</g0>')).toBe(true)
     expect(keepsFormattingMarkers('Click <g0>here</g0>', '点击这里')).toBe(false)
     expect(keepsFormattingMarkers('plain', '纯文本')).toBe(true)
-  })
-
-  it('toGoogleHtml expands self-closing markers that HTML parsing would treat as open tags', () => {
-    expect(toGoogleHtml('a<c0/>b <g1>c</g1> <c2>x</c2>')).toBe('a<c0></c0>b <g1>c</g1> <c2>x</c2>')
-  })
-
-  it('fromGoogleHtml decodes numeric entities but keeps markup-significant ones escaped', () => {
-    expect(fromGoogleHtml('it&#39;s &#8217;ok&#x2019; &#60;tag&#62; &amp; &#38;')).toBe("it's ’ok’ &lt;tag&gt; &amp; &amp;")
-    expect(stripMarkup(fromGoogleHtml('<g0>A &amp; B</g0> &quot;q&quot;'))).toBe('A & B "q"')
   })
 })
