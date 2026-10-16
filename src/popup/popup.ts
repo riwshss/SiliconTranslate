@@ -1,4 +1,4 @@
-import { canUseCloudAi, describeQuota, PLAN_LABELS } from '../shared/entitlement'
+import { canUseCloudAi, defaultEntitlement, describeQuota, effectiveModel, PLAN_LABELS, sanitizeEntitlement, type Entitlement } from '../shared/entitlement'
 import { resolveUiLang, translator, UI_LANG_SETTINGS, type MessageKey, type Translate, type UiLangSetting } from '../shared/i18n'
 import { LANGUAGES } from '../shared/languages'
 import type { AccountRequest, AccountResult, PageState, TabMessage } from '../shared/messages'
@@ -26,6 +26,8 @@ let host = ''
 let pageState: PageState | null = null
 let pageNote: MessageKey | null = null
 let pageScheme: string | null = null
+/** Plan as last reported by the backend (cached by the service worker); decides which models are open. */
+let entitlement: Entitlement = defaultEntitlement(RELEASE_CHANNEL)
 
 const t: Translate = (key, params) => translator(resolveUiLang(settings?.uiLang ?? 'auto'))(key, params)
 
@@ -184,7 +186,34 @@ function setConn(state: 'idle' | 'warn' | 'ok' | 'error', key: MessageKey): void
   pill.textContent = t(key)
 }
 
-/** One radio card per model; arrow keys move the choice like a native radio group. */
+function modelCards(): HTMLButtonElement[] {
+  return [...document.querySelectorAll<HTMLButtonElement>('.model')]
+}
+
+const isLocked = (card: HTMLElement) => !entitlement.models.includes(card.dataset.value ?? '')
+
+/**
+ * Marks the model actually used (a locked choice shows its fallback) and greys out models the
+ * plan does not include. Safe to call again after the plan or the language changed.
+ */
+function renderModels(): void {
+  const active = effectiveModel(entitlement, settings.model) ?? settings.model
+  const cards = modelCards()
+  cards.forEach((card) => {
+    const model = CLOUD_MODELS.find((m) => m.id === card.dataset.value)
+    const locked = isLocked(card)
+    const isActive = card.dataset.value === active
+    card.setAttribute('aria-checked', String(isActive))
+    card.setAttribute('aria-disabled', String(locked))
+    card.classList.toggle('is-locked', locked)
+    card.tabIndex = isActive ? 0 : -1
+    const note = card.querySelector('.model-note')
+    if (model && note) note.textContent = t(locked ? 'modelLocked' : model.note)
+  })
+  $('models-hint').hidden = entitlement.plan !== 'beta' || !cards.some(isLocked)
+}
+
+/** One radio card per model; arrow keys move the choice like a native radio group, skipping locked ones. */
 function initModelPicker(): void {
   const root = $('models')
   const cards = CLOUD_MODELS.map(({ id, label }) => {
@@ -203,16 +232,10 @@ function initModelPicker(): void {
   })
   root.replaceChildren(...cards)
 
-  const paint = () =>
-    cards.forEach((card) => {
-      const isActive = card.dataset.value === settings.model
-      card.setAttribute('aria-checked', String(isActive))
-      card.tabIndex = isActive ? 0 : -1
-    })
   const select = async (card: HTMLButtonElement) => {
-    if (card.dataset.value === settings.model) return
+    if (isLocked(card) || card.dataset.value === settings.model) return
     await persist({ model: card.dataset.value })
-    paint()
+    renderModels()
   }
   cards.forEach((card, i) => {
     card.addEventListener('click', () => void select(card))
@@ -220,12 +243,16 @@ function initModelPicker(): void {
       const step = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
       if (!step) return
       e.preventDefault()
-      const next = cards[(i + step + cards.length) % cards.length]
-      next.focus()
-      void select(next)
+      for (let k = 1; k < cards.length; k++) {
+        const next = cards[(i + step * k + cards.length * k) % cards.length]
+        if (isLocked(next)) continue
+        next.focus()
+        void select(next)
+        return
+      }
     })
   })
-  paint()
+  renderModels()
 }
 
 /** Plan and today's quota, straight from the backend. */
@@ -240,7 +267,8 @@ async function checkAccount(): Promise<void> {
     setConn('error', 'connFailed')
     return
   }
-  const { entitlement } = result
+  entitlement = result.entitlement
+  renderModels()
   const isEnabled = canUseCloudAi(entitlement)
   const isExhausted = !!entitlement.quota && entitlement.quota.used >= entitlement.quota.limit
   const summary = [t(PLAN_LABELS[entitlement.plan]), entitlement.quota ? describeQuota(entitlement.quota, resolveUiLang(settings.uiLang)) : '']
@@ -271,11 +299,7 @@ function applyLanguage(): void {
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => (el.textContent = t(el.dataset.i18n as MessageKey)))
   document.querySelectorAll<HTMLElement>('[data-i18n-aria]').forEach((el) => el.setAttribute('aria-label', t(el.dataset.i18nAria as MessageKey)))
   document.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle as MessageKey)))
-  document.querySelectorAll<HTMLElement>('.model').forEach((card) => {
-    const model = CLOUD_MODELS.find((m) => m.id === card.dataset.value)
-    const note = card.querySelector('.model-note')
-    if (model && note) note.textContent = t(model.note)
-  })
+  renderModels()
   const uiLang = $<HTMLSelectElement>('ui-lang')
   const names: Record<UiLangSetting, string> = { auto: t('uiAuto'), 'zh-CN': '简体中文', en: 'English' }
   uiLang.replaceChildren(...UI_LANG_SETTINGS.map((value) => new Option(names[value], value)))
@@ -290,6 +314,8 @@ function applyLanguage(): void {
 
 async function init(): Promise<void> {
   settings = await loadSettings()
+  const stored = (await chrome.storage.local.get('entitlement')).entitlement
+  entitlement = sanitizeEntitlement(stored) ?? entitlement
   $('beta-badge').hidden = RELEASE_CHANNEL !== 'beta'
 
   const lang = $<HTMLSelectElement>('lang')

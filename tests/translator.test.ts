@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError } from '../src/core/errors'
 import type { ChatMessage } from '../src/core/prompt'
 import type { ApiConfig } from '../src/background/api'
 import { DEFAULT_SETTINGS, type Settings } from '../src/shared/settings'
@@ -19,13 +18,14 @@ vi.mock('../src/background/api', () => ({
   },
 }))
 
-const { translateBatch, plainReply, looksTruncated } = await import('../src/background/translator')
+type Translator = typeof import('../src/background/translator')
+/** Re-imported with the translator so `instanceof ApiError` matches the module under test. */
+let ApiError: typeof import('../src/core/errors')['ApiError']
+/** Re-imported before every test: a fresh module means an empty translation cache and install id. */
+let translateBatch: Translator['translateBatch']
+const { plainReply, looksTruncated } = await import('../src/background/translator')
 
-let settingsId = 0
-/** A fresh model name per test keeps the module-level translation cache from leaking between tests. */
-const settings = (): Settings => ({ ...DEFAULT_SETTINGS, model: `test/model-${++settingsId}` })
-
-async function translate(texts: string[], withSettings: Settings = settings()) {
+async function translate(texts: string[], withSettings: Settings = DEFAULT_SETTINGS) {
   const items: Record<number, string> = {}
   const outcome = await translateBatch(withSettings, texts, '', (i, text) => (items[i] = text), new AbortController().signal)
   return { items, outcome }
@@ -37,7 +37,10 @@ const json = (batch: Record<string, string>, fn: (text: string) => string) =>
 /** chrome.storage stand-in: the engine keeps the install id and cached plan there. */
 let store: Record<string, unknown>
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules()
+  ;({ translateBatch } = await import('../src/background/translator'))
+  ;({ ApiError } = await import('../src/core/errors'))
   calls = []
   configs = []
   store = {}
@@ -104,7 +107,8 @@ describe('translateBatch retries', () => {
 
     model = (batch, call) => (call === 1 ? [json(batch, () => '他说')] : ['{"0": ""}'])
     calls = []
-    expect((await translate([long])).items).toEqual({ 0: '他说' })
+    // A different sentence: the first one is cached now.
+    expect((await translate([`${long} Again.`])).items).toEqual({ 0: '他说' })
   })
 })
 
@@ -127,17 +131,31 @@ describe('Silk AI cloud engine', () => {
   let textId = 0
   const cloudText = () => `cloud text ${++textId}`
 
-  it('calls the Silk backend with an anonymous install id and the chosen model', async () => {
+  it('calls the Silk backend with an anonymous install id and the beta model', async () => {
     model = (batch) => [json(batch, (t) => `译:${t}`)]
     const text = cloudText()
-    const { items } = await translate([text], { ...DEFAULT_SETTINGS, model: 'openai/gpt-6-sol' })
+    const { items } = await translate([text])
     expect(items).toEqual({ 0: `译:${text}` })
-    expect(configs[0].model).toBe('openai/gpt-6-sol')
+    expect(configs[0].model).toBe('deepseek/deepseek-v4-flash')
     expect(configs[0].baseUrl).toMatch(/\/v1$/)
     expect(configs[0].headers?.['X-Silk-Install']).toMatch(/^[0-9a-f-]{36}$/)
-    // Earlier tests already created the (memoized) install id: every request reuses it.
-    await translate([cloudText()])
-    expect(configs[1].headers?.['X-Silk-Install']).toBe(configs[0].headers?.['X-Silk-Install'])
+    expect(store.installId).toBe(configs[0].headers?.['X-Silk-Install'])
+  })
+
+  it('falls back to the plan default while the chosen model is locked (beta)', async () => {
+    model = (batch) => [json(batch, (t) => `译:${t}`)]
+    const text = cloudText()
+    await translate([text], { ...DEFAULT_SETTINGS, model: 'openai/gpt-6-sol' })
+    expect(configs[0].model).toBe('deepseek/deepseek-v4-flash')
+  })
+
+  it('uses the chosen model once the plan includes it, with its own cache', async () => {
+    model = (batch) => [json(batch, (t) => `译:${t}`)]
+    const text = cloudText()
+    await translate([text])
+    store.entitlement = { plan: 'pro', features: ['cloud-ai'], models: ['deepseek/deepseek-v4-flash', 'openai/gpt-6-sol'], quota: null }
+    await translate([text], { ...DEFAULT_SETTINGS, model: 'openai/gpt-6-sol' })
+    expect(configs.map((c) => c.model)).toEqual(['deepseek/deepseek-v4-flash', 'openai/gpt-6-sol'])
   })
 
   it('treats a used-up daily quota as final: no per-item retries', async () => {
@@ -151,7 +169,7 @@ describe('Silk AI cloud engine', () => {
   })
 
   it('stops before any request when the cached plan does not include cloud AI', async () => {
-    store.entitlement = { plan: 'free', features: [], quota: null }
+    store.entitlement = { plan: 'free', features: [], models: [], quota: null }
     model = (batch) => [json(batch, (t) => t)]
     // Like a missing key, a missing plan is a setup error: it rejects and the port reports every item failed.
     await expect(translate([cloudText()], DEFAULT_SETTINGS)).rejects.toMatchObject({ code: 'upgrade' })

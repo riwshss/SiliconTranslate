@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= 'D:\\DevCache\\ms-playwright'
 const { chromium } = await import('playwright')
-const { startMockServer, stats, cloud } = await import('./mock-server.mjs')
+const { startMockServer, stats, cloud, ALL_MODELS } = await import('./mock-server.mjs')
 
 const MOCK_PORT = 18787
 const MOCK_ORIGIN = `http://127.0.0.1:${MOCK_PORT}`
@@ -46,7 +46,8 @@ const context = await chromium.launchPersistentContext(profile, {
 try {
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
   const extensionId = new URL(worker.url()).host
-  // Settings left over from older versions (engine, API key) must be ignored; Chinese UI for the checks below.
+  // Settings left over from older versions (engine, API key) must be ignored, and the chosen model is
+  // locked during the beta (requests fall back to the cheapest); Chinese UI for the checks below.
   await worker.evaluate(() =>
     chrome.storage.local.set({ settings: { provider: 'openai', apiKey: 'sk-test', model: 'google/gemini-3.8-flash', uiLang: 'zh-CN' } }),
   )
@@ -67,8 +68,8 @@ try {
     await page.waitForFunction(() => document.getElementById('p1').textContent.includes('译·'), null, { timeout: 15000 })
     assert(stats.rateLimited === 1, `rateLimited=${stats.rateLimited}`)
   })
-  await check('请求走 Silk 后端：所选模型、匿名安装 ID、不带 API Key', async () => {
-    assert(cloud.models.length > 0 && cloud.models.every((m) => m === 'google/gemini-3.8-flash'), cloud.models.join(','))
+  await check('请求走 Silk 后端：测试期只用最便宜的模型、匿名安装 ID、不带 API Key', async () => {
+    assert(cloud.models.length > 0 && cloud.models.every((m) => m === 'deepseek/deepseek-v4-flash'), cloud.models.join(','))
     assert(cloud.installIds.size === 1, `install ids ${cloud.installIds.size}`)
     assert(cloud.withAuthorization === 0, 'Authorization header leaked to the Silk backend')
   })
@@ -183,24 +184,29 @@ try {
     assert((await popup.$eval('#conn', (el) => el.textContent)) === '可用', 'conn pill')
     assert(!(await popup.$eval('#beta-badge', (el) => el.hidden)), 'beta badge hidden')
   })
-  await check('只能选择三个 AI 模型，无引擎 / API Key 设置', async () => {
-    const models = await popup.$$eval('.model', (cards) => cards.map((c) => [c.dataset.value, c.getAttribute('aria-checked')]))
-    assert(
-      JSON.stringify(models) ===
-        JSON.stringify([
-          ['anthropic/claude-haiku-5.5', 'false'],
-          ['openai/gpt-6-sol', 'false'],
-          ['google/gemini-3.8-flash', 'true'],
-        ]),
-      JSON.stringify(models),
-    )
+  const modelCards = () =>
+    popup.$$eval('.model', (cards) => cards.map((c) => [c.dataset.value, c.getAttribute('aria-checked'), c.getAttribute('aria-disabled')]))
+  const storedModel = () => worker.evaluate(() => chrome.storage.local.get('settings').then((s) => s.settings.model))
+  await check('测试期：四个模型里只有 DeepSeek V4 Flash 可选，其余锁定并提示', async () => {
+    const cards = await modelCards()
+    const expected = [
+      ['deepseek/deepseek-v4-flash', 'true', 'false'],
+      ['anthropic/claude-haiku-5.5', 'false', 'true'],
+      ['openai/gpt-6-sol', 'false', 'true'],
+      ['google/gemini-3.8-flash', 'false', 'true'],
+    ]
+    assert(JSON.stringify(cards) === JSON.stringify(expected), JSON.stringify(cards))
+    assert(!(await popup.$eval('#models-hint', (el) => el.hidden)), 'beta hint hidden')
+    assert((await popup.$eval('.model[data-value="openai/gpt-6-sol"] .model-note', (el) => el.textContent)) === '正式版开放', 'locked note')
     assert((await popup.$$('#provider, #api-key, #google-key, #base-url')).length === 0, 'old engine controls still present')
   })
-  await check('切换模型写入 storage', async () => {
-    await popup.click('.model[data-value="anthropic/claude-haiku-5.5"]')
+  await check('点击锁定的模型无效，点击可用模型写入 storage', async () => {
+    await popup.click('.model[data-value="anthropic/claude-haiku-5.5"]', { force: true })
     await popup.waitForTimeout(300)
-    const model = await worker.evaluate(() => chrome.storage.local.get('settings').then((s) => s.settings.model))
-    assert(model === 'anthropic/claude-haiku-5.5', model)
+    assert((await storedModel()) === 'google/gemini-3.8-flash', await storedModel())
+    await popup.click('.model[data-value="deepseek/deepseek-v4-flash"]')
+    await popup.waitForTimeout(300)
+    assert((await storedModel()) === 'deepseek/deepseek-v4-flash', await storedModel())
   })
   await check('修改目标语言写入 storage', async () => {
     await popup.selectOption('#lang', 'ja')
@@ -214,6 +220,7 @@ try {
   await popup.waitForTimeout(400) // let background transitions finish
   await popup.screenshot({ path: join(OUT, '5-popup-dark.png'), fullPage: true })
   await popup.emulateMedia({ colorScheme: 'light' })
+  await popup.waitForTimeout(400) // let background transitions finish
 
   console.log('\nEnglish UI')
   await check('界面语言切到 English：Popup 文案与额度显示', async () => {
@@ -244,7 +251,36 @@ try {
       await page.click('silk-ui .trigger')
     }
     const cardText = () => page.$eval('silk-ui', (el) => el.shadowRoot.querySelector('.result')?.textContent ?? '')
-    await check('划词翻译走 Silk 后端：新选的模型、匿名安装 ID、不带 API Key', async () => {
+    await check('直接请求锁定模型会被后端拒绝（403 model_locked）', async () => {
+      const res = await fetch(`${origin}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Silk-Install': [...cloud.installIds][0] },
+        body: JSON.stringify({ model: 'openai/gpt-6-sol', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+      })
+      assert(res.status === 403 && res.headers.get('x-silk-error') === 'model_locked', `${res.status}`)
+    })
+    await check('正式版（pro）解锁全部模型：选 GPT-6 Sol 后请求使用它', async () => {
+      cloud.plan = 'pro'
+      cloud.planModels = ALL_MODELS
+      await popup.bringToFront()
+      await popup.click('#test-btn')
+      await popup.waitForFunction(() => document.querySelectorAll('.model[aria-disabled="true"]').length === 0)
+      assert(await popup.$eval('#models-hint', (el) => el.hidden), 'beta hint still shown')
+      await popup.click('.model[data-value="openai/gpt-6-sol"]')
+      await popup.waitForTimeout(300)
+      assert((await storedModel()) === 'openai/gpt-6-sol', await storedModel())
+      const before = cloud.models.length
+      await selectAndTranslate('#p2')
+      await page.waitForFunction(() => document.querySelector('silk-ui').shadowRoot.querySelector('.result').textContent.includes('划词译文'), null, {
+        timeout: 10000,
+      })
+      assert(cloud.models.slice(before).every((m) => m === 'openai/gpt-6-sol') && cloud.models.length > before, cloud.models.slice(before).join(','))
+      cloud.plan = 'beta'
+      cloud.planModels = ALL_MODELS.slice(0, 1)
+      await popup.click('#test-btn')
+      await popup.waitForFunction(() => document.querySelectorAll('.model[aria-disabled="true"]').length === 3)
+    })
+    await check('划词翻译走 Silk 后端：测试期回落到最便宜的模型、匿名安装 ID、不带 API Key', async () => {
       const before = cloud.models.length
       await selectAndTranslate('#title')
       await page.waitForFunction(
@@ -252,7 +288,7 @@ try {
         null,
         { timeout: 10000 },
       )
-      assert(cloud.models.slice(before).every((m) => m === 'anthropic/claude-haiku-5.5') && cloud.models.length > before, cloud.models.slice(before).join(','))
+      assert(cloud.models.slice(before).every((m) => m === 'deepseek/deepseek-v4-flash') && cloud.models.length > before, cloud.models.slice(before).join(','))
       assert(cloud.installIds.size === 1, `install ids ${cloud.installIds.size}`)
       assert(cloud.withAuthorization === 0, 'Authorization header leaked to the Silk backend')
     })

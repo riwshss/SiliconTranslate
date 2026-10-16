@@ -32,6 +32,11 @@ async function uiLang(): Promise<UiLang> {
   return resolveUiLang(settings?.uiLang ?? 'auto')
 }
 
+/** The backend refused a model the cached plan allowed: the plan changed, so fetch it again. */
+function refreshPlanAfter(code: string | undefined): void {
+  if (code === 'model-locked') refreshEntitlement().catch((err) => console.error('[silk] failed to refresh plan', err))
+}
+
 function safePost(port: chrome.runtime.Port, message: BatchEvent | StreamEvent): void {
   try {
     port.postMessage(message)
@@ -81,10 +86,13 @@ function handleBatchPort(port: chrome.runtime.Port): void {
         (index, text) => safePost(port, { type: 'item', index, text }),
         signal,
       )
+      refreshPlanAfter(outcome.error?.code)
       safePost(port, { type: 'end', failed: outcome.failed, error: outcome.error?.toWire(lang) })
     } catch (err) {
       const failed = message.texts.map((_, i) => i)
-      safePost(port, { type: 'end', failed, error: toApiError(err).toWire(lang) })
+      const error = toApiError(err)
+      refreshPlanAfter(error.code)
+      safePost(port, { type: 'end', failed, error: error.toWire(lang) })
     }
   })
 }
@@ -104,7 +112,9 @@ function handleStreamPort(port: chrome.runtime.Port): void {
       await streamTextTranslation(settings, message.text, language, (text) => safePost(port, { type: 'delta', text }), signal)
       safePost(port, { type: 'end' })
     } catch (err) {
-      safePost(port, { type: 'end', error: toApiError(err).toWire(lang) })
+      const error = toApiError(err)
+      refreshPlanAfter(error.code)
+      safePost(port, { type: 'end', error: error.toWire(lang) })
     }
   })
 }

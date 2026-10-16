@@ -2,7 +2,7 @@
 // in local storage: it carries no personal data and only lets the backend count a daily quota.
 
 import { ApiError } from '../core/errors'
-import { canUseCloudAi, defaultEntitlement, sanitizeEntitlement, type Entitlement } from '../shared/entitlement'
+import { defaultEntitlement, effectiveModel, sanitizeEntitlement, type Entitlement } from '../shared/entitlement'
 import { CLOUD_API_URL, RELEASE_CHANNEL } from '../shared/service'
 import { fetchWithRetry, type ApiConfig } from './api'
 
@@ -26,7 +26,7 @@ export function getInstallId(): Promise<string> {
   return installIdPromise
 }
 
-/** `model` must be one of CLOUD_MODELS; the backend checks it against the same allowlist. */
+/** `model` must be one the plan allows (see usableModel); the backend checks it again. */
 export async function cloudApiConfig(model: string): Promise<ApiConfig> {
   return { baseUrl: `${CLOUD_API_URL}/v1`, model, headers: { 'X-Silk-Install': await getInstallId() } }
 }
@@ -47,7 +47,12 @@ export async function refreshEntitlement(signal?: AbortSignal): Promise<Entitlem
   return entitlement
 }
 
-/** Fails fast when the cached plan lacks cloud AI; the backend still enforces it either way. */
-export async function assertCanUse(): Promise<void> {
-  if (!canUseCloudAi(await cachedEntitlement())) throw new ApiError('upgrade')
+/**
+ * The model to call for the user's choice under the cached plan (a locked choice falls back to
+ * the plan default). Fails fast when the plan has no cloud AI; the backend enforces both anyway.
+ */
+export async function usableModel(chosen: string): Promise<string> {
+  const model = effectiveModel(await cachedEntitlement(), chosen)
+  if (!model) throw new ApiError('upgrade')
+  return model
 }

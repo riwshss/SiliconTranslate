@@ -3,7 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 
 [vars]
-# Models are an allowlist in src/app.ts (MODELS); the extension picks one per request.
+# Models are an allowlist in src/app.ts (MODELS); PLAN_MODELS decides which ones each plan may
+# use (the beta only gets deepseek/deepseek-v4-flash). The extension picks one per request.
 # Daily limits, counted in prompt characters, reset at UTC midnight.
 INSTALL_DAILY_CHARS = "2000000"
 IP_DAILY_CHARS = "6000000"

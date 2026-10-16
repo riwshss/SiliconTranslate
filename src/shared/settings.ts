@@ -8,10 +8,12 @@ export type BilingualStyle = 'dashed' | 'highlight'
 export type DomainRule = 'always' | 'never'
 
 /**
- * Models the Silk AI engine offers, as OpenRouter ids. The backend keeps the same allowlist
- * (server/src/app.ts) and refuses anything else.
+ * Models the Silk AI engine offers, as OpenRouter ids. The backend keeps the same list
+ * (server/src/app.ts MODELS) and decides which ones each plan may use; the beta only gets the
+ * first, cheapest one.
  */
 export const CLOUD_MODELS: readonly { id: string; label: string; note: MessageKey }[] = [
+  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', note: 'modelCheapest' },
   { id: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5', note: 'modelFast' },
   { id: 'openai/gpt-6-sol', label: 'GPT-6 Sol', note: 'modelBest' },
   { id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'modelBalanced' },

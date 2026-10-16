@@ -69,6 +69,7 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
   const silkError = res.headers.get(SILK_ERROR_HEADER)
   if (silkError === 'quota_exceeded') return new ApiError('quota')
   if (silkError === 'upgrade_required' || res.status === 402) return new ApiError('upgrade')
+  if (silkError === 'model_locked') return new ApiError('model-locked')
   const raw = await res.text().catch(() => '')
   let detail = raw.slice(0, 200)
   try {

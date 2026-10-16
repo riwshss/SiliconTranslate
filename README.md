@@ -4,17 +4,18 @@
 界面支持**简体中文与 English**（默认跟随浏览器语言，可在面板中切换）。
 扩展：TypeScript + esbuild，无前端框架、无运行时依赖。后端：Cloudflare Worker（`server/`）。
 
-*English: a Chrome extension for in-place web page translation. It only uses the Silk AI cloud engine (no API key needed; free during the beta with 2,000,000 characters per day). Pick Claude Haiku 5.5, GPT-6 Sol or Gemini 3.8 Flash in the popup. The interface is available in Simplified Chinese and English.*
+*English: a Chrome extension for in-place web page translation. It only uses the Silk AI cloud engine (no API key needed; free during the beta with 2,000,000 characters per day). During the beta it runs DeepSeek V4 Flash, the cheapest model; Claude Haiku 5.5, GPT-6 Sol and Gemini 3.8 Flash open after the beta. The interface is available in Simplified Chinese and English.*
 
 ## 功能
 
-- **三个 AI 模型可选**（面板「AI 模型」中切换，译文按模型分开缓存）
+- **四个 AI 模型**（面板「AI 模型」中切换，译文按模型分开缓存）。**测试期间只开放最便宜的 DeepSeek V4 Flash**，其余三个在面板中显示为「正式版开放」，无法选择；后端同样只放行 DeepSeek V4 Flash。
 
-  | 模型 | OpenRouter ID | 特点 |
-  |---|---|---|
-  | Claude Haiku 5.5（默认） | `anthropic/claude-haiku-5.5` | 快速 · 经济 |
-  | GPT-6 Sol | `openai/gpt-6-sol` | 质量最高 |
-  | Gemini 3.8 Flash | `google/gemini-3.8-flash` | 均衡 |
+  | 模型 | OpenRouter ID | 特点 | 每百万 token 输入 / 输出 | 测试期 |
+  |---|---|---|---|---|
+  | DeepSeek V4 Flash（默认） | `deepseek/deepseek-v4-flash` | 最便宜 · 中文强（关闭思考模式） | $0.091 / $0.182 | ✅ 开放 |
+  | Claude Haiku 5.5 | `anthropic/claude-haiku-5.5` | 快速 | $0.10 / $0.50 | 🔒 |
+  | GPT-6 Sol | `openai/gpt-6-sol` | 质量最高 | $2 / $10 | 🔒 |
+  | Gemini 3.8 Flash | `google/gemini-3.8-flash` | 均衡 | $0.825 / $4.125 | 🔒 |
 
 - **整页翻译，两种显示模式**
   - **覆盖原文**：译文直接写回原文本节点，链接、加粗、行内代码等格式原样保留。
@@ -39,7 +40,7 @@ npm run build
 
 1. 打开 `chrome://extensions`，开启右上角「开发者模式」。
 2. 点击「加载已解压的扩展程序」，选择项目下的 `dist/` 目录。
-3. 点击工具栏中的丝译图标，在「AI 模型」中选择模型。点「查看额度」可确认服务可用和今日剩余额度。
+3. 点击工具栏中的丝译图标。测试期间固定使用 DeepSeek V4 Flash，无需设置；点「查看额度」可确认服务可用和今日剩余额度。
 
 扩展安装前已打开的标签页无需刷新：在面板中点「翻译此页」时会自动注入脚本。
 
@@ -47,7 +48,7 @@ npm run build
 
 | 项目 | 说明 |
 |---|---|
-| AI 模型 | Claude Haiku 5.5 / GPT-6 Sol / Gemini 3.8 Flash |
+| AI 模型 | DeepSeek V4 Flash（测试期唯一可用）/ Claude Haiku 5.5 / GPT-6 Sol / Gemini 3.8 Flash |
 | 目标语言 | 整页翻译与划词翻译的目标语言 |
 | 默认模式 | 点「翻译此页」或按快捷键时首先使用的模式 |
 | 双语样式 | 虚线下划线 / 高亮 |
@@ -65,8 +66,10 @@ Cloudflare Worker，作用是**把 OpenRouter 的 Key 留在服务器上**（写
   - 每个安装：`INSTALL_DAILY_CHARS`（默认 200 万字）
   - 每个 IP：`IP_DAILY_CHARS`（默认 600 万字，防止反复重装刷额度）
   - 全站：`GLOBAL_DAILY_CHARS`（默认 2 亿字，钱包保护，超出后当天所有人暂停）
-- 模型由客户端在请求的 `model` 字段中指定，后端只接受 `server/src/app.ts` 中 `MODELS` 白名单里的三个模型（与扩展的 `CLOUD_MODELS` 保持一致），其他模型返回 `400`；不传时用第一个（Claude Haiku 5.5）。
-- 额度按字数计，不区分模型；各模型价格差别很大（每百万 token 输入 / 输出：Haiku 5.5 $0.10 / $0.50，Gemini 3.8 Flash $0.825 / $4.125，GPT-6 Sol $2 / $10）。
+- 模型由客户端在请求的 `model` 字段中指定。`server/src/app.ts` 的 `MODELS` 是全部已知模型（与扩展的 `CLOUD_MODELS` 一致），未知模型返回 `400`；`PLAN_MODELS` 决定每个套餐能用哪些：测试版只有 `deepseek/deepseek-v4-flash`，`pro` 全部可用。请求套餐外的模型返回 `403` 并带 `X-Silk-Error: model_locked`，不扣额度；不传模型时用套餐的第一个。
+- `GET /v1/entitlement` 会返回套餐可用的 `models`，扩展据此锁定面板里的其他模型；用户之前选了锁定的模型时，自动改用套餐默认模型。
+- DeepSeek V4 Flash 支持推理模式，后端请求时带 `reasoning: { effort: "none" }` 关闭思考，避免多花输出 token（`MODEL_OPTIONS`）。
+- 额度按字数计，不区分模型；正式版开放贵的模型时，建议按模型设不同额度（GPT-6 Sol 的价格约是 DeepSeek V4 Flash 的 30–50 倍）。
 - OpenRouter 出错时会退还本次扣的额度，客户端的自动重试不会白扣额度。
 - 接口：`GET /v1/entitlement`（套餐与今日额度）、`POST /v1/chat/completions`（OpenAI 兼容，流式）。JSON 响应统一为 `{ success, data, error, meta }`；额度用完返回 `429` 并带 `X-Silk-Error: quota_exceeded`。
 
@@ -97,7 +100,7 @@ npx wrangler deploy                         # 输出 https://silk-translate-api.
 付费逻辑只需改后端，扩展基本不用动：
 
 - `src/shared/entitlement.ts` 定义套餐（`beta` / `free` / `pro`）和功能（目前只有 `cloud-ai`）。
-- 后端 `server/src/app.ts` 的 `CURRENT_PLAN` 现在固定为 `beta`。接入支付（如 Stripe、Paddle）后，改成按安装 ID 或账户查询付费状态，并给不同套餐不同额度（也可以按模型区分）。
+- 后端 `server/src/app.ts` 的 `CURRENT_PLAN` 现在固定为 `beta`。接入支付（如 Stripe、Paddle）后，改成按安装 ID 或账户查询付费状态，并给不同套餐不同额度和模型（`PLAN_MODELS`）。
 - 后端对没有权限的请求返回 `402`，扩展显示「当前套餐不包含 Silk AI 云端翻译」。扩展本地也会缓存套餐，提前拦下注定失败的请求，但真正的限制以后端为准。
 - 正式版用 `SILK_CHANNEL=stable` 构建：服务器回复前默认按免费版处理。
 
@@ -118,7 +121,7 @@ npm run e2e         # Playwright 真浏览器端到端测试（自动构建一�
 npm run icons       # 重新生成 static/icons 下的 PNG 图标
 ```
 
-E2E 使用本地 mock 服务器模拟 Silk 后端：SSE 流式响应、429 限流、并发统计、额度查询、匿名安装 ID、所选模型、额度用完，以及中英文界面切换；不消耗真实 API 额度，截图输出到 `e2e/output/`。
+E2E 使用本地 mock 服务器模拟 Silk 后端：SSE 流式响应、429 限流、并发统计、额度查询、匿名安装 ID、按套餐锁定模型（测试版 / 正式版）、额度用完，以及中英文界面切换；不消耗真实 API 额度，截图输出到 `e2e/output/`。
 后端的单元测试在 `tests/server.test.ts`，和扩展一起由 `npm test` 运行。
 如 Playwright 浏览器装在非默认位置，请设置 `PLAYWRIGHT_BROWSERS_PATH`。
 

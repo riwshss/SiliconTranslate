@@ -62,9 +62,9 @@ describe('sanitizeSettings', () => {
     expect(result.uiLang).toBe('auto')
   })
 
-  it('offers exactly the three Silk AI models and defaults to the first', () => {
-    expect(CLOUD_MODELS.map((m) => m.id)).toEqual(['anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash'])
-    expect(DEFAULT_SETTINGS.model).toBe('anthropic/claude-haiku-5.5')
+  it('offers the four Silk AI models and defaults to the cheapest', () => {
+    expect(CLOUD_MODELS.map((m) => m.id)).toEqual(['deepseek/deepseek-v4-flash', 'anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash'])
+    expect(DEFAULT_SETTINGS.model).toBe('deepseek/deepseek-v4-flash')
   })
 
   it('drops settings of removed engines (provider, API keys, endpoint)', () => {
@@ -84,7 +84,7 @@ describe('sanitizeSettings', () => {
   })
 
   it('engineId separates cached translations per model', () => {
-    expect(engineId(DEFAULT_SETTINGS)).toBe('cloud:anthropic/claude-haiku-5.5')
+    expect(engineId(DEFAULT_SETTINGS)).toBe('cloud:deepseek/deepseek-v4-flash')
     expect(engineId({ ...DEFAULT_SETTINGS, model: 'openai/gpt-6-sol' })).toBe('cloud:openai/gpt-6-sol')
   })
 
