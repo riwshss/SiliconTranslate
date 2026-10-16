@@ -112,6 +112,15 @@ describe('handleRequest', () => {
     })
   })
 
+  it('asks OpenRouter to prefer fast providers, with a configurable floor', async () => {
+    const { deps, fetchMock } = setup()
+    await handleRequest(chat('hello'), env, deps)
+    await handleRequest(chat('hello'), { ...env, MIN_PROVIDER_THROUGHPUT: '80' }, deps)
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init?.body as string))
+    expect(bodies[0].provider).toEqual({ preferred_min_throughput: 50 })
+    expect(bodies[1].provider).toEqual({ preferred_min_throughput: 80 })
+  })
+
   it('forwards to OpenRouter with the server key and the chosen model, reasoning off', async () => {
     const { deps, fetchMock } = setup()
     const res = await handleRequest(chat('hello'), env, deps)
@@ -162,6 +171,18 @@ describe('handleRequest', () => {
     expect((await handleRequest(chat('y'.repeat(300)), tightIp, deps)).status).toBe(429)
     const res = await handleRequest(new Request('https://api.test/v1/entitlement', { headers: { 'X-Silk-Install': INSTALL } }), tightIp, deps)
     expect(await res.json()).toMatchObject({ data: { quota: { used: 0 } } })
+  })
+
+  it('gives back the install and IP quota when the global counter is exhausted', async () => {
+    const { deps, fetchMock } = setup()
+    const tightGlobal = { ...env, GLOBAL_DAILY_CHARS: '100' }
+    expect((await handleRequest(chat('x'.repeat(300)), tightGlobal, deps)).status).toBe(429)
+    expect(fetchMock).not.toHaveBeenCalled()
+    const res = await handleRequest(new Request('https://api.test/v1/entitlement', { headers: { 'X-Silk-Install': INSTALL } }), tightGlobal, deps)
+    expect(await res.json()).toMatchObject({ data: { quota: { used: 0 } } })
+    // The IP counter was refunded too: a fresh install on the same IP can still spend it.
+    const other = '00000000-0000-4000-8000-000000000000'
+    expect((await handleRequest(chat('x'.repeat(50), {}, { 'X-Silk-Install': other }), { ...env, IP_DAILY_CHARS: '300' }, deps)).status).toBe(200)
   })
 
   it('refuses models outside the allowlist without spending quota', async () => {

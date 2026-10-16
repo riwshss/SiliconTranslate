@@ -19,6 +19,12 @@ export const CLOUD_MODELS: readonly { id: string; label: string; note: MessageKe
   { id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'modelBalanced' },
 ]
 export const DEFAULT_MODEL = CLOUD_MODELS[0].id
+
+/**
+ * Requests in flight at once, across all tabs. Fixed (not a user setting): the Silk backend
+ * absorbs it, and 429s still halve it temporarily (see background/translator.ts).
+ */
+export const MAX_CONCURRENCY = 8
 const MODEL_IDS = CLOUD_MODELS.map((m) => m.id)
 
 export interface Settings {
@@ -29,7 +35,6 @@ export interface Settings {
   readonly bilingualStyle: BilingualStyle
   readonly shortcut: string
   readonly selectionEnabled: boolean
-  readonly maxConcurrency: number
   readonly domainRules: Readonly<Record<string, DomainRule>>
 }
 
@@ -46,7 +51,6 @@ export const DEFAULT_SETTINGS: Settings = {
   bilingualStyle: 'dashed',
   shortcut: 'Alt+T',
   selectionEnabled: true,
-  maxConcurrency: 4,
   domainRules: {},
 }
 
@@ -68,11 +72,10 @@ function sanitizeDomainRules(value: unknown): Record<string, DomainRule> {
 
 /**
  * Storage is external input: every field is validated and falls back to its default. Fields of
- * removed engines (provider, API keys, base URL) are dropped here.
+ * removed engines (provider, API keys, base URL) and the old concurrency setting are dropped here.
  */
 export function sanitizeSettings(raw: unknown): Settings {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-  const concurrency = Number(src.maxConcurrency)
   return {
     model: pickEnum(src.model, MODEL_IDS, DEFAULT_MODEL),
     uiLang: pickEnum(src.uiLang, UI_LANG_SETTINGS, DEFAULT_SETTINGS.uiLang),
@@ -81,7 +84,6 @@ export function sanitizeSettings(raw: unknown): Settings {
     bilingualStyle: pickEnum(src.bilingualStyle, ['dashed', 'highlight'] as const, 'dashed'),
     shortcut: isValidShortcut(src.shortcut) ? src.shortcut : DEFAULT_SETTINGS.shortcut,
     selectionEnabled: typeof src.selectionEnabled === 'boolean' ? src.selectionEnabled : true,
-    maxConcurrency: Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8 ? concurrency : 4,
     domainRules: sanitizeDomainRules(src.domainRules),
   }
 }
@@ -103,8 +105,11 @@ export async function saveSettings(patch: Partial<Settings>): Promise<Settings> 
   return next
 }
 
-/** Fields of the engines earlier versions offered (OpenAI-compatible, Google, Chrome on-device). */
-const LEGACY_KEYS = ['provider', 'apiKey', 'googleApiKey', 'baseUrl']
+/**
+ * Fields of the engines earlier versions offered (OpenAI-compatible, Google, Chrome on-device), and
+ * the concurrency setting that is now fixed.
+ */
+const LEGACY_KEYS = ['provider', 'apiKey', 'googleApiKey', 'baseUrl', 'maxConcurrency']
 
 /**
  * Rewrites stored settings only when they still hold legacy fields, so API keys from earlier

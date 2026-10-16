@@ -14,6 +14,8 @@ export interface Env {
   readonly GLOBAL_DAILY_CHARS: string
   readonly MAX_REQUEST_CHARS: string
   readonly MAX_OUTPUT_TOKENS: string
+  /** Tokens/s (median) a provider should reach to be tried first; slower ones become fallbacks. */
+  readonly MIN_PROVIDER_THROUGHPUT?: string
   readonly APP_URL: string
   readonly APP_TITLE: string
 }
@@ -49,6 +51,16 @@ const LEGACY_MODEL = 'silk-cloud'
 /** Extra OpenRouter fields per model. DeepSeek V4 can reason, which translation never needs. */
 const MODEL_OPTIONS: Readonly<Record<string, Record<string, unknown>>> = {
   'deepseek/deepseek-v4-flash': { reasoning: { effort: 'none' } },
+}
+
+/**
+ * OpenRouter serves one model through many providers, at very different speeds (DeepSeek V4
+ * Flash: roughly 5 to 80 tokens/s). By default it routes by price alone. This preference moves
+ * providers below the throughput floor to the back, so the cheapest fast one is tried first and
+ * slow ones only serve as fallbacks; it never makes a request fail.
+ */
+function providerRouting(env: Env): Record<string, unknown> {
+  return { provider: { preferred_min_throughput: limitOf(env.MIN_PROVIDER_THROUGHPUT ?? '', 50) } }
 }
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
@@ -153,18 +165,16 @@ async function handleEntitlement(request: Request, env: Env, deps: Deps): Promis
 }
 
 /**
- * Spends `amount` on every counter in order. At the first exhausted one, gives back what the
- * earlier counters took and returns that counter's state; null when everything was spent.
+ * Spends `amount` on every counter at once (one round trip instead of one per counter, since
+ * this sits in front of every translation). If any counter is exhausted, gives back what the
+ * others took and returns the first exhausted counter's state; null when everything was spent.
  */
 async function spend(deps: Deps, amount: number, counters: ReadonlyArray<[string, number]>): Promise<QuotaResult | null> {
-  for (const [index, [key, limit]] of counters.entries()) {
-    const result = await deps.quota.consume(key, amount, limit)
-    if (!result.allowed) {
-      await refund(deps, amount, counters.slice(0, index))
-      return result
-    }
-  }
-  return null
+  const results = await Promise.all(counters.map(([key, limit]) => deps.quota.consume(key, amount, limit)))
+  const exhausted = results.find((result) => !result.allowed)
+  if (!exhausted) return null
+  await refund(deps, amount, counters.filter((_, i) => results[i].allowed))
+  return exhausted
 }
 
 /** Gives `amount` back to every counter: a failed AI call must not cost the user quota. */
@@ -212,6 +222,7 @@ async function handleChat(request: Request, env: Env, deps: Deps): Promise<Respo
         stream: chat.stream,
         temperature: chat.temperature,
         max_tokens: maxTokens,
+        ...providerRouting(env),
         ...MODEL_OPTIONS[model],
       }),
     })

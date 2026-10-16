@@ -232,14 +232,16 @@ export class PageTranslator {
     if (!this.isTranslating()) return
     for (const entry of entries) {
       if (!entry.isIntersecting) continue
+      const { top, bottom } = entry.boundingClientRect
+      const isVisible = bottom > 0 && top < window.innerHeight
       this.targetUnits.get(entry.target)?.forEach((unit) => {
-        if (this.units.has(unit) && this.needsRequest(unit)) this.request(unit)
+        if (this.units.has(unit) && this.needsRequest(unit)) this.request(unit, isVisible)
       })
       this.io?.unobserve(entry.target)
     }
   }
 
-  private request(unit: Unit): void {
+  private request(unit: Unit, isVisible: boolean): void {
     const cached = this.cache.get(unit.key)
     if (cached !== undefined) {
       setTranslation(unit, cached)
@@ -252,7 +254,7 @@ export class PageTranslator {
       waiting = new Set()
       this.waiting.set(unit.key, waiting)
       this.stats = { ...this.stats, total: this.stats.total + 1 }
-      this.batcher.enqueue(unit.key)
+      this.batcher.enqueue(unit.key, isVisible)
     }
     waiting.add(unit)
     this.emit()

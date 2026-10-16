@@ -114,8 +114,8 @@ try {
     await page.waitForFunction(() => document.getElementById('last').textContent.includes('译·'), null, { timeout: 15000 })
     assert(stats.items > itemsBeforeScroll, 'no new requests after scroll')
   })
-  await check(`并发不超过 4（峰值 ${stats.peak}）且每段只请求一次`, async () => {
-    assert(stats.peak <= 4, `peak ${stats.peak}`)
+  await check(`并发不超过 8（峰值 ${stats.peak}）且每段只请求一次`, async () => {
+    assert(stats.peak <= 8, `peak ${stats.peak}`)
     assert(stats.items === stats.keys.size, `items ${stats.items} vs unique ${stats.keys.size}`)
   })
   await page.evaluate(() => scrollTo(0, 0))
