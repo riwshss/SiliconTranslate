@@ -72,6 +72,11 @@ function renderPageState(state: PageState | null): void {
   $('mode-seg').hidden = !isActive
   $('host').previousElementSibling?.classList.toggle('is-live', isActive && state.mode !== 'original')
   if (isActive) modeSeg.setValue(state.mode)
+  // Silk progress line along the bottom of the page card while paragraphs are being translated.
+  const progress = $('page-progress')
+  const isBusy = !!state && state.started && state.mode !== 'original' && state.total > state.done + state.failed
+  progress.hidden = !isBusy
+  if (state && isBusy) (progress.firstElementChild as HTMLElement).style.transform = `scaleX(${(state.done + state.failed) / state.total})`
   const status = $('page-status')
   if (!state || !state.started) status.textContent = ''
   else if (state.failed) status.textContent = t('pageFailed', { n: state.failed })
@@ -298,9 +303,20 @@ async function checkAccount(): Promise<void> {
   const isExhausted = !!entitlement.quota && entitlement.quota.used >= entitlement.quota.limit
   const summary = [t(PLAN_LABELS[entitlement.plan]), entitlement.quota ? describeQuota(entitlement.quota, resolveUiLang(settings.uiLang)) : '']
   setTestResult(summary.filter(Boolean).join(' · '), isEnabled && !isExhausted ? 'ok' : 'error')
+  renderQuotaMeter(entitlement.quota)
   if (!isEnabled) setConn('warn', 'connUpgrade')
   else if (isExhausted) setConn('warn', 'connQuota')
   else setConn('ok', 'connReady')
+}
+
+/** Thin usage bar: indigo below 80 %, warning colour from 80 %, danger when used up (the text says the same). */
+function renderQuotaMeter(quota: Entitlement['quota']): void {
+  const meter = $('quota-meter')
+  meter.hidden = !quota
+  if (!quota) return
+  const share = quota.limit > 0 ? Math.min(quota.used / quota.limit, 1) : 1
+  meter.dataset.level = share >= 1 ? 'full' : share >= 0.8 ? 'high' : 'ok'
+  ;(meter.firstElementChild as HTMLElement).style.transform = `scaleX(${share})`
 }
 
 async function runAccountCheck(): Promise<void> {
@@ -351,6 +367,10 @@ async function init(): Promise<void> {
 
   defaultModeSeg.setValue(settings.defaultMode)
   styleSeg.setValue(settings.bilingualStyle)
+
+  const animate = $<HTMLInputElement>('animate')
+  animate.checked = settings.animateTranslations
+  animate.addEventListener('change', () => void persist({ animateTranslations: animate.checked }))
 
   const selection = $<HTMLInputElement>('selection')
   selection.checked = settings.selectionEnabled

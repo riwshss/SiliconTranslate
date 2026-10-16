@@ -1,5 +1,6 @@
 import { build, context } from 'esbuild'
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tokenCss } from './src/shared/design-tokens.mjs'
 
 // SILK_API_URL: Silk backend the cloud engine talks to (the deployed Cloudflare Worker).
 // SILK_CHANNEL: "beta" (default: everything unlocked, Beta in the name) or "stable".
@@ -56,6 +57,8 @@ function copyStatic() {
   cpSync('static', outdir, { recursive: true })
   cpSync('src/popup/popup.html', `${outdir}/popup.html`)
   cpSync('src/popup/popup.css', `${outdir}/popup.css`)
+  // Same Silk & Ink tokens as the shadow-DOM UI (src/content/ui/styles.ts).
+  writeFileSync(`${outdir}/tokens.css`, `/* Generated from src/shared/design-tokens.mjs. */\n${tokenCss(':root')}\n`)
   writeManifest()
 }
 

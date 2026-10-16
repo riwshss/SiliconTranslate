@@ -134,8 +134,8 @@ function handleStreamPort(port: chrome.runtime.Port): void {
     const lang = await uiLang()
     try {
       const settings = await loadSettings()
-      const language = pickSelectionLanguage(settings, message.text)
-      safePost(port, { type: 'meta', targetLabel: language.label, speech: language.speech })
+      const language = pickSelectionLanguage(settings, message.text, message.isReversed === true)
+      safePost(port, { type: 'meta', targetLabel: language.label, speech: language.speech, lang: language.code })
       await streamTextTranslation(settings, message.text, language, (text) => safePost(port, { type: 'delta', text }), signal)
       safePost(port, { type: 'end' })
     } catch (err) {

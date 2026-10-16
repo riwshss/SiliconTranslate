@@ -6,6 +6,8 @@ import { ICONS } from './icons'
 
 const COLLAPSE_DELAY_MS = 2600
 const RING_LENGTH = 2 * Math.PI * 17
+/** Matches the silk-gather animation in styles.ts. */
+const GATHER_MS = 640
 
 export interface HudHandlers {
   onMode(mode: DisplayMode): void
@@ -71,13 +73,15 @@ export function createHud(ui: UiHost, handlers: HudHandlers, initialT: Translate
 
   let isDismissed = false
   let collapseTimer: ReturnType<typeof setTimeout> | null = null
+  let doneTimer: ReturnType<typeof setTimeout> | null = null
   let lastState: PageState | null = null
+  let wasBusy = false
 
   const moveThumb = (mode: DisplayMode) => {
     const active = buttons.find((b) => b.dataset.mode === mode)
     if (!active) return
     thumb.style.width = `${active.offsetWidth}px`
-    thumb.style.transform = `translateX(${active.offsetLeft - 2}px)`
+    thumb.style.transform = `translateX(${active.offsetLeft}px)`
   }
 
   const scheduleCollapse = (isBusy: boolean) => {
@@ -109,6 +113,13 @@ export function createHud(ui: UiHost, handlers: HudHandlers, initialT: Translate
     root.classList.toggle('is-working', isBusy)
     const progress = state.total ? (state.done + state.failed) / state.total : 1
     ring.style.strokeDashoffset = String(RING_LENGTH * (1 - progress))
+    // Finished: the thread's end gathers into a point, then fades.
+    if (wasBusy && !isBusy && state.failed === 0) {
+      root.classList.add('is-done')
+      if (doneTimer) clearTimeout(doneTimer)
+      doneTimer = setTimeout(() => root.classList.remove('is-done'), GATHER_MS)
+    } else if (isBusy) root.classList.remove('is-done')
+    wasBusy = isBusy
     buttons.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === state.mode)))
     requestAnimationFrame(() => moveThumb(state.mode))
     scheduleCollapse(isBusy || state.failed > 0)

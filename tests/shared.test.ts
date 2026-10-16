@@ -28,6 +28,7 @@ describe('sanitizeSettings', () => {
       targetLang: 'ja',
       defaultMode: 'bilingual',
       bilingualStyle: 'highlight',
+      animateTranslations: false,
       shortcut: 'Ctrl+Shift+Y',
       selectionEnabled: false,
       domainRules: { 'example.com': 'always', 'bad host!': 'always', 'x.org': 'sometimes' },
@@ -38,10 +39,21 @@ describe('sanitizeSettings', () => {
       targetLang: 'ja',
       defaultMode: 'bilingual',
       bilingualStyle: 'highlight',
+      animateTranslations: false,
       shortcut: 'Ctrl+Shift+Y',
       selectionEnabled: false,
       domainRules: { 'example.com': 'always' },
     })
+  })
+
+  it('gives new installs the silk bilingual style but keeps the style earlier installs chose', () => {
+    expect(DEFAULT_SETTINGS.bilingualStyle).toBe('silk')
+    expect(sanitizeSettings({}).bilingualStyle).toBe('silk')
+    expect(sanitizeSettings({ bilingualStyle: 'dashed' }).bilingualStyle).toBe('dashed')
+    expect(sanitizeSettings({ bilingualStyle: 'highlight' }).bilingualStyle).toBe('highlight')
+    expect(sanitizeSettings({ bilingualStyle: 'neon' }).bilingualStyle).toBe('silk')
+    expect(sanitizeSettings({}).animateTranslations).toBe(true)
+    expect(sanitizeSettings({ animateTranslations: 'no' }).animateTranslations).toBe(true)
   })
 
   it('rejects unsafe or invalid values', () => {

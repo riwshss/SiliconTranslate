@@ -37,10 +37,12 @@ export type BatchEvent =
 /** content → background over PORT_STREAM (selection popover). */
 export interface StreamRequest {
   readonly text: string
+  /** Translate the other way round (the card's switch-direction button). */
+  readonly isReversed?: boolean
 }
 
 export type StreamEvent =
-  | { readonly type: 'meta'; readonly targetLabel: string; readonly speech: string }
+  | { readonly type: 'meta'; readonly targetLabel: string; readonly speech: string; readonly lang: string }
   | { readonly type: 'delta'; readonly text: string }
   | { readonly type: 'end'; readonly error?: WireError }
 

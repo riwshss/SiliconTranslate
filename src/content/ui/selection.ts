@@ -43,12 +43,16 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, 
     <div class="card glass" hidden role="dialog">
       <div class="card-head">
         <span class="chip"></span>
-        <button class="icon-btn copy">${ICONS.copy}</button>
-        <button class="icon-btn speak">${ICONS.speak}</button>
         <button class="icon-btn close">${ICONS.close}</button>
       </div>
       <div class="source"></div>
+      <div class="silk-rule"></div>
       <div class="result" aria-live="polite"></div>
+      <div class="card-foot">
+        <button class="icon-btn copy">${ICONS.copy}</button>
+        <button class="icon-btn speak">${ICONS.speak}</button>
+        <button class="icon-btn swap">${ICONS.swap}</button>
+      </div>
     </div>`)
   ui.layer.append(trigger, card)
 
@@ -58,6 +62,7 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, 
   const copyBtn = card.querySelector('.copy') as HTMLButtonElement
   const speakBtn = card.querySelector('.speak') as HTMLButtonElement
   const closeBtn = card.querySelector('.close') as HTMLButtonElement
+  const swapBtn = card.querySelector('.swap') as HTMLButtonElement
 
   /** Labels follow the interface language, which may change while the page is open. */
   const applyLabels = () => {
@@ -70,6 +75,7 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, 
     card.setAttribute('aria-label', t('selCard'))
     label(copyBtn, t('copy'))
     label(speakBtn, t('speak'))
+    label(swapBtn, t('swapDirection'))
     label(closeBtn, t('closeTitle'), t('close'))
   }
 
@@ -77,6 +83,8 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, 
   let anchorRect: DOMRect | null = null
   let translated = ''
   let speechLang = 'zh-CN'
+  /** Translate the other way round (e.g. into English instead of Chinese). */
+  let isReversed = false
   let port: chrome.runtime.Port | null = null
 
   const hideTrigger = () => {
@@ -104,6 +112,8 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, 
     const fitsBelow = rect.bottom + 10 + CARD_ESTIMATED_HEIGHT < innerHeight
     card.style.top = fitsBelow ? `${rect.bottom + 10}px` : ''
     card.style.bottom = fitsBelow ? '' : `${clamp(innerHeight - rect.top + 10, EDGE, innerHeight - 120)}px`
+    // Grows out of the selection: from its top edge when the card sits above it.
+    card.classList.toggle('is-above', !fitsBelow)
   }
 
   const renderResult = (isStreaming: boolean) => {
@@ -121,6 +131,8 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, 
     if (event.type === 'meta') {
       chip.textContent = `→ ${event.targetLabel}`
       speechLang = event.speech
+      // Font follows the translation's language (Traditional vs Simplified glyph forms).
+      result.lang = event.lang
     } else if (event.type === 'delta') {
       translated += event.text
       renderResult(true)
@@ -135,12 +147,15 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, 
   const openCard = () => {
     hideTrigger()
     port?.disconnect()
+    speechSynthesis.cancel()
+    speakBtn.innerHTML = ICONS.speak
     translated = ''
     applyLabels()
     chip.textContent = getT()('selTranslating')
     source.textContent = selectedText
     result.classList.remove('is-error')
-    result.replaceChildren(html('<div class="skeleton"><i></i><i></i></div>'))
+    result.removeAttribute('lang')
+    result.replaceChildren(html('<div class="loader"></div>'))
     if (anchorRect) placeCard(anchorRect)
     card.hidden = false
     try {
@@ -154,13 +169,23 @@ export function createSelectionTranslator(ui: UiHost, isEnabled: () => boolean, 
       if (port && !translated) showError(getT()('portLost'))
       port = null
     })
-    const request: StreamRequest = { text: selectedText }
+    const request: StreamRequest = { text: selectedText, isReversed }
     port.postMessage(request)
   }
 
   // Keep the page selection alive when pressing our button.
   trigger.addEventListener('mousedown', (e) => e.preventDefault())
-  trigger.addEventListener('click', openCard)
+  trigger.addEventListener('click', () => {
+    isReversed = false
+    swapBtn.classList.remove('is-on')
+    openCard()
+  })
+  swapBtn.addEventListener('click', () => {
+    if (!selectedText) return
+    isReversed = !isReversed
+    swapBtn.classList.toggle('is-on', isReversed)
+    openCard()
+  })
   closeBtn.addEventListener('click', closeCard)
   copyBtn.addEventListener('click', async () => {
     if (!translated) return

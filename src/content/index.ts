@@ -29,7 +29,7 @@ function nextMode(current: DisplayMode, preferred: TranslateMode): DisplayMode {
 async function main(): Promise<void> {
   let settings = await loadSettings()
   const host = location.hostname
-  const ui = createUiHost()
+  const ui = createUiHost(resolveUiLang(settings.uiLang))
   const t = () => translator(resolveUiLang(settings.uiLang))
   const pageTranslator = new PageTranslator(settings)
   const hud = createHud(
@@ -47,7 +47,10 @@ async function main(): Promise<void> {
     const isLangChanged = next.uiLang !== settings.uiLang
     settings = next
     pageTranslator.updateSettings(next)
-    if (isLangChanged) hud.setTranslate(t())
+    if (isLangChanged) {
+      ui.setLang(resolveUiLang(next.uiLang))
+      hud.setTranslate(t())
+    }
   })
 
   const setMode = (mode: DisplayMode) => {

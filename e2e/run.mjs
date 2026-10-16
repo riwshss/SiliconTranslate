@@ -195,6 +195,23 @@ try {
   await page.waitForTimeout(400)
   await page.screenshot({ path: join(OUT, '3-selection.png') })
 
+  // D9 (docs/DESIGN.md): the floating UI must read on dark and colourful pages too.
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.evaluate(() => Object.assign(document.body.style, { background: '#101215', color: '#e6e6e6' }))
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: join(OUT, '8-dark-page-selection.png') })
+  await page.click('silk-ui .seg button[data-mode="bilingual"]')
+  await page.waitForSelector('#p1 silk-trans')
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: join(OUT, '9-dark-page-bilingual.png') })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.evaluate(() => Object.assign(document.body.style, { background: 'linear-gradient(135deg, #ff7a59, #7b4dff)', color: '#ffffff' }))
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: join(OUT, '10-colour-page-bilingual.png') })
+  await page.evaluate(() => Object.assign(document.body.style, { background: '', color: '' }))
+  await page.click('silk-ui .seg button[data-mode="original"]')
+  await page.waitForFunction(() => !document.querySelector('silk-trans'))
+
   console.log('\nPopup')
   const popup = await context.newPage()
   await popup.setViewportSize({ width: 372, height: 900 })
@@ -269,6 +286,7 @@ try {
     assert((await popup.$eval('#test-result', (el) => el.textContent)).includes('10萬'), 'quota in Traditional Chinese')
     assert((await popup.title()) === '絲譯 Silk Translate', await popup.title())
   })
+  await popup.screenshot({ path: join(OUT, '11-popup-zh-TW.png'), fullPage: true })
   await popup.selectOption('#ui-lang', 'zh-CN')
   await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('今日已用'))
 

@@ -21,7 +21,7 @@ export function segmented(root: HTMLElement, onChange: (value: string) => void):
     thumb.hidden = !active
     if (!active) return
     thumb.style.width = `${active.offsetWidth}px`
-    thumb.style.transform = `translateX(${active.offsetLeft - 3}px)`
+    thumb.style.transform = `translateX(${active.offsetLeft}px)`
   }
 
   const select = (value: string) => {

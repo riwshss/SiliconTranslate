@@ -1,3 +1,4 @@
+import { createStagger } from '../core/stagger'
 import { resolveUiLang, translator } from '../shared/i18n'
 import type { PageState } from '../shared/messages'
 import { engineId, type DisplayMode, type Settings } from '../shared/settings'
@@ -21,6 +22,7 @@ import {
   renderUnit,
   setTranslation,
   TRANSLATION_TAG,
+  type RenderOptions,
   type Unit,
 } from './unit'
 
@@ -66,6 +68,8 @@ export class PageTranslator {
   private emitTimer: ReturnType<typeof setTimeout> | null = null
   private readonly listeners = new Set<(state: PageState) => void>()
   private readonly batcher: Batcher
+  /** Stagger for translations revealed in the same burst. */
+  private readonly nextRevealDelay = createStagger()
   private readonly scanCallbacks: ScanCallbacks = {
     onRoot: (root, runs) => this.replaceRootUnits(root, runs),
     onShadowRoot: (shadow) => this.observeMutations(shadow),
@@ -144,7 +148,7 @@ export class PageTranslator {
 
   private resetTranslations(): void {
     this.batcher.cancelAll()
-    this.units.forEach((unit) => renderUnit(unit, 'original', this.settings.bilingualStyle))
+    this.units.forEach((unit) => renderUnit(unit, 'original', this.renderOptions()))
     this.units = new Set()
     this.cache.clear()
     this.waiting.clear()
@@ -177,7 +181,7 @@ export class PageTranslator {
   }
 
   private dropUnit(unit: Unit): void {
-    renderUnit(unit, 'original', this.settings.bilingualStyle)
+    renderUnit(unit, 'original', this.renderOptions())
     this.units.delete(unit)
     this.targetUnits.get(unit.target)?.delete(unit)
     this.waiting.get(unit.key)?.delete(unit)
@@ -207,8 +211,14 @@ export class PageTranslator {
     if (this.isTranslating()) this.observe(unit.target)
   }
 
-  private render(unit: Unit): void {
-    renderUnit(unit, this.mode, this.settings.bilingualStyle)
+  private renderOptions(revealDelay?: number): RenderOptions {
+    return { style: this.settings.bilingualStyle, lang: this.settings.targetLang, revealDelay }
+  }
+
+  /** `isNew`: the translation just arrived, so a bilingual copy fades in (unless turned off). */
+  private render(unit: Unit, isNew = false): void {
+    const shouldReveal = isNew && this.mode === 'bilingual' && this.settings.animateTranslations
+    renderUnit(unit, this.mode, this.renderOptions(shouldReveal ? this.nextRevealDelay() : undefined))
   }
 
   private needsRequest(unit: Unit): boolean {
@@ -270,7 +280,7 @@ export class PageTranslator {
     waiting.forEach((unit) => {
       if (!this.units.has(unit)) return
       setTranslation(unit, translation)
-      this.render(unit)
+      this.render(unit, true)
     })
     this.emit()
   }

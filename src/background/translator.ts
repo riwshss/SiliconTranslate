@@ -149,11 +149,16 @@ export async function translateBatch(
   return { failed, error: error ?? new ApiError('bad-response', 'missedItems') }
 }
 
-/** Selection popover: if the text is already in the target language, translate the other way. */
-export function pickSelectionLanguage(settings: Settings, text: string): Language {
+/**
+ * Selection popover: the target language, unless the text is already in it; then the other way
+ * (into English, or from English into the browser's Chinese). `isReversed` (the card's switch
+ * button) picks the other of the two.
+ */
+export function pickSelectionLanguage(settings: Settings, text: string, isReversed = false): Language {
   const target = getLanguage(settings.targetLang)
-  if (!isLikelyInLanguage(text, target.code)) return target
-  return getLanguage(target.code.startsWith('en') ? defaultTargetLang() : 'en')
+  const other = getLanguage(target.code.startsWith('en') ? defaultTargetLang() : 'en')
+  const isInTarget = isLikelyInLanguage(text, target.code)
+  return isInTarget !== isReversed ? other : target
 }
 
 export async function streamTextTranslation(

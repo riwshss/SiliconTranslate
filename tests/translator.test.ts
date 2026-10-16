@@ -141,6 +141,16 @@ describe('translateBatch retries', () => {
 })
 
 describe('translator helpers', () => {
+  it('picks the selection direction, and the switch button picks the other one', async () => {
+    const { pickSelectionLanguage } = await import('../src/background/translator')
+    const zhTw = { ...DEFAULT_SETTINGS, targetLang: 'zh-TW' }
+    expect(pickSelectionLanguage(zhTw, 'Hello world, this is the plan').code).toBe('zh-TW')
+    expect(pickSelectionLanguage(zhTw, 'Hello world, this is the plan', true).code).toBe('en')
+    // Already in the target language: the other way round, and the switch brings it back.
+    expect(pickSelectionLanguage(zhTw, '這是中文句子').code).toBe('en')
+    expect(pickSelectionLanguage(zhTw, '這是中文句子', true).code).toBe('zh-TW')
+  })
+
   it('plainReply unwraps fences and think blocks but rejects JSON-looking replies', () => {
     expect(plainReply('<think>hmm</think>\n```text\n你好\n```')).toBe('你好')
     expect(plainReply('{"0": broken')).toBeNull()
