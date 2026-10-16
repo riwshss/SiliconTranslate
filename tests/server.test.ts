@@ -194,6 +194,13 @@ describe('install tokens', () => {
     expect((await handleRequest(install('8.8.8.8'), env, deps)).status).toBe(200)
   })
 
+  it('lets an IP get new tokens again under a new QUOTA_EPOCH', async () => {
+    const { deps } = setup()
+    for (let i = 0; i < 3; i++) await handleRequest(install(), env, deps)
+    expect((await handleRequest(install(), env, deps)).status).toBe(429)
+    expect((await handleRequest(install(), { ...env, QUOTA_EPOCH: 'v3' }, deps)).status).toBe(200)
+  })
+
   it('refuses to issue tokens without a signing secret', async () => {
     const { deps } = setup()
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
@@ -219,7 +226,7 @@ describe('install tokens', () => {
     const res = await handleRequest(translateReq(['hello'], {}, { 'X-Silk-Install': INSTALL }), env, deps)
     expect(res.status).toBe(200)
     await eventsOf(res, settle)
-    expect(quota.states.get('legacy')?.used).toBe(5)
+    expect(quota.states.get('v2:legacy')?.used).toBe(5)
     const tightLegacy = { ...env, LEGACY_DAILY_CHARS: '4' }
     expect((await handleRequest(translateReq(['other text'], {}, { 'X-Silk-Install': OTHER }), tightLegacy, deps)).status).toBe(429)
   })
@@ -339,6 +346,18 @@ describe('/v1/translate', () => {
     expect(res.status).toBe(200)
     await eventsOf(res, settle)
     expect(await used(deps)).toBe(5)
+  })
+
+  it('starts the install and IP quotas over under a new QUOTA_EPOCH', async () => {
+    const { deps, settle } = setup()
+    for (let i = 0; i < 2; i++) await eventsOf(await handleRequest(translateReq([`${i}`.repeat(500)]), env, deps), settle)
+    expect((await handleRequest(translateReq(['more']), env, deps)).status).toBe(429)
+    const nextEpoch = { ...env, QUOTA_EPOCH: 'v3' }
+    const res = await handleRequest(translateReq(['more']), nextEpoch, deps)
+    expect(res.status).toBe(200)
+    await eventsOf(res, settle)
+    const entitlement = await handleRequest(new Request('https://api.test/v1/entitlement', { headers: { 'X-Silk-Install': TOKEN } }), nextEpoch, deps)
+    expect(await entitlement.json()).toMatchObject({ data: { quota: { used: 4 } } })
   })
 
   it('counts the global limit in 16 shards after the response, then refuses for the rest of the day', async () => {
@@ -501,7 +520,7 @@ describe('legacy /v1/chat/completions', () => {
     const res = await handleRequest(chat('hello'), env, deps)
     expect(res.status).toBe(200)
     // Every request costs at least 200 characters here, since the client writes the prompt.
-    expect(quota.states.get('legacy')?.used).toBe(200)
+    expect(quota.states.get('v2:legacy')?.used).toBe(200)
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toMatchObject({ max_tokens: 266, reasoning: { effort: 'none' } })
     expect((await handleRequest(chat('x'.repeat(4900)), env, deps)).status).toBe(429)
   })

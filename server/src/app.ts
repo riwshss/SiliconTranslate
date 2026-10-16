@@ -27,6 +27,8 @@ export interface Env {
    */
   readonly LEGACY_UNTIL?: string
   readonly LEGACY_DAILY_CHARS?: string
+  /** Prefix of the per-day counters; a new value starts everyone's day over (see epoch()). */
+  readonly QUOTA_EPOCH?: string
   /** Plan of an install without a stored one (see resolvePlan); "free" when unset. */
   readonly DEFAULT_PLAN?: string
   /**
@@ -254,7 +256,7 @@ async function handleInstall(request: Request, env: Env, deps: Deps): Promise<Re
     console.error('INSTALL_SECRET is not set')
     return fail(500, 'server_error', 'Install signing is not configured')
   }
-  const issued = await deps.quota.consume(`issue:${clientIp(request)}`, 1, limitOf(env.INSTALLS_PER_IP_DAILY, 3))
+  const issued = await deps.quota.consume(`${epoch(env)}:issue:${clientIp(request)}`, 1, limitOf(env.INSTALLS_PER_IP_DAILY, 3))
   if (!issued.allowed) return fail(429, 'install_limited', 'Too many new installs from this network today', quotaMeta(issued))
   return ok({ token: await signInstallId(env.INSTALL_SECRET, crypto.randomUUID()) })
 }
@@ -283,10 +285,18 @@ export async function resolvePlan(id: string, env: Env, deps: Deps): Promise<Pla
   return isPlan(env.DEFAULT_PLAN) ? env.DEFAULT_PLAN : 'free'
 }
 
-// "v2": since 2.3 usage is source characters, not whole prompts; what the 2.2 backend counted under
-// the plain `install:` / `ip:` keys (against 20x higher limits) must not carry over.
-const installCounter = (id: string) => `v2:install:${id}`
-const ipCounter = (request: Request) => `v2:ip:${clientIp(request)}`
+/**
+ * Prefix of every per-day counter users spend (install, IP, legacy pool, token issuing). Setting
+ * QUOTA_EPOCH to a new value and deploying starts everyone's day over; the global wallet guard
+ * keeps counting. "v2" when unset: since 2.3 usage is source characters, not whole prompts, so
+ * what the 2.2 backend counted under the plain `install:` / `ip:` keys must not carry over.
+ */
+function epoch(env: Env): string {
+  return env.QUOTA_EPOCH?.trim() || 'v2'
+}
+
+const installCounter = (env: Env, id: string) => `${epoch(env)}:install:${id}`
+const ipCounter = (env: Env, request: Request) => `${epoch(env)}:ip:${clientIp(request)}`
 
 const MIN_DEV_KEY_LENGTH = 32
 
@@ -311,15 +321,15 @@ async function planOf(who: Identity, request: Request, env: Env, deps: Deps): Pr
 /** Counters spent synchronously on every request; separate Durable Objects, called in parallel. */
 function requestCounters(who: Identity, request: Request, env: Env): Array<[string, number]> {
   const counters: Array<[string, number]> = [
-    [installCounter(who.id), limitOf(env.INSTALL_DAILY_CHARS, 100_000)],
-    [ipCounter(request), limitOf(env.IP_DAILY_CHARS, 300_000)],
+    [installCounter(env, who.id), limitOf(env.INSTALL_DAILY_CHARS, 100_000)],
+    [ipCounter(env, request), limitOf(env.IP_DAILY_CHARS, 300_000)],
   ]
   if (who.isLegacy) counters.push(legacyCounter(env))
   return counters
 }
 
 function legacyCounter(env: Env): [string, number] {
-  return ['legacy', limitOf(env.LEGACY_DAILY_CHARS, 200_000)]
+  return [`${epoch(env)}:legacy`, limitOf(env.LEGACY_DAILY_CHARS, 200_000)]
 }
 
 /**
@@ -379,7 +389,7 @@ async function handleEntitlement(request: Request, env: Env, deps: Deps): Promis
   const who = await identify(request, env)
   if (!who) return fail(401, 'unauthorized', 'Missing or invalid install token')
   const plan = await planOf(who, request, env, deps)
-  const quota = UNLIMITED_PLANS.has(plan) ? null : quotaMeta(await deps.quota.peek(installCounter(who.id), limitOf(env.INSTALL_DAILY_CHARS, 100_000)))
+  const quota = UNLIMITED_PLANS.has(plan) ? null : quotaMeta(await deps.quota.peek(installCounter(env, who.id), limitOf(env.INSTALL_DAILY_CHARS, 100_000)))
   return ok({ plan, features: PLAN_FEATURES[plan], models: PLAN_MODELS[plan], quota })
 }
 
