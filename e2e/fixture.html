@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Article</title>
+    <style>
+      body { font: 16px/1.6 Georgia, serif; max-width: 680px; margin: 40px auto; padding: 0 16px; color: #222; }
+      nav { display: flex; gap: 16px; border-bottom: 1px solid #ddd; padding-bottom: 8px; }
+      nav a { color: #0645ad; text-decoration: none; }
+      h1 { font-family: system-ui, sans-serif; }
+      pre { background: #f5f5f5; padding: 12px; }
+      .filler { color: #555; }
+    </style>
+  </head>
+  <body>
+    <nav id="nav"><a href="/home">Home</a><a href="/docs">Documentation</a><a href="/about">About us</a></nav>
+    <main id="main">
+      <h1 id="title">Building resilient web applications</h1>
+      <p id="p1">Click <a id="link" href="https://example.com/guide">this guide</a> to learn about <strong>error handling</strong> and run <code>npm test</code> before shipping.</p>
+      <p id="p2">Press <button id="btn" type="button">Save changes</button> to store your work in the browser.</p>
+      <p id="zh">这一段已经是中文，不需要翻译。</p>
+      <pre id="pre">const answer = computeTheAnswer()</pre>
+      <p id="num">2026-10-15 · 12:30</p>
+      <ul id="list">
+        <li>Fast startup with lazy loading of every module.</li>
+        <li>Careful handling of <em>network failures</em> and retries.</li>
+      </ul>
+      <p id="dyn">Status message from the framework.</p>
+      <div id="filler"></div>
+      <p id="last">This is the final paragraph at the very bottom of the page.</p>
+    </main>
+    <script>
+      window.clicks = 0
+      document.getElementById('btn').addEventListener('click', () => window.clicks++)
+      const filler = document.getElementById('filler')
+      for (let i = 1; i <= 60; i++) {
+        const p = document.createElement('p')
+        p.className = 'filler'
+        p.textContent = `Filler paragraph number ${i} describes another interesting part of the system.`
+        filler.append(p)
+      }
+    </script>
+  </body>
+</html>
