@@ -43,10 +43,11 @@ tag = "v1"
 new_sqlite_classes = ["QuotaCounter"]
 
 # One data point per /v1/translate request: blobs [model, provider, errorCode, kind, plan],
-# doubles [chars, ttftMs, totalMs, cachedTokens, cacheHits].
-[[analytics_engine_datasets]]
-binding = "METRICS"
-dataset = "silk_translate_requests"
+# doubles [chars, ttftMs, totalMs, cachedTokens, cacheHits]. Off for now: deploys fail with
+# code 10089 until the account's Analytics Engine is active; METRICS is optional in the code.
+# [[analytics_engine_datasets]]
+# binding = "METRICS"
+# dataset = "silk_translate_requests"
 
 # Paid plans, once they launch: `npx wrangler kv namespace create PLANS`, then
 # [[kv_namespaces]]
