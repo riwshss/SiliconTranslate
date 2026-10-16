@@ -1,5 +1,6 @@
 import { buildTranslationFragment, computeOverlayPlan, serializeRun, type Serialized } from '../core/markup'
 import { isLikelyInLanguage, shouldTranslateText } from '../core/text-filter'
+import { DARK, LIGHT } from '../shared/design-tokens.mjs'
 import type { BilingualStyle, DisplayMode } from '../shared/settings'
 import { classifyElement, type Run } from './dom-classify'
 import { originalText, restoreText, writeText } from './text-state'
@@ -81,15 +82,58 @@ function outerStyle(isInline: boolean): string {
     : 'all:unset;display:block;margin-block-start:.3em;white-space:normal;'
 }
 
-function innerStyle(style: BilingualStyle): string {
-  return style === 'highlight'
-    ? 'all:unset;display:inline;background:color-mix(in srgb,#f6c445 28%,transparent);border-radius:.25em;padding:.04em .22em;-webkit-box-decoration-break:clone;box-decoration-break:clone;'
-    : 'all:unset;display:inline;text-decoration:underline dashed color-mix(in srgb,currentColor 45%,transparent);text-decoration-thickness:1px;text-underline-offset:.32em;'
+/** Halfway between two #RRGGBB colours. */
+function midpoint(a: string, b: string): string {
+  const channel = (hex: string, i: number) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16)
+  return `#${[0, 1, 2].map((i) => Math.round((channel(a, i) + channel(b, i)) / 2).toString(16).padStart(2, '0')).join('')}`
 }
 
-function ensureTranslationElement(unit: Unit, translation: string, style: BilingualStyle): void {
+/**
+ * The silk colour for someone else's page, where our CSS variables don't exist: halfway between
+ * the light and dark silk tokens, mixed with the page's own text colour so it reads on light and
+ * dark pages alike.
+ */
+const SILK_MID = midpoint(LIGHT.silk, DARK.silk)
+const PAGE_SILK = `color-mix(in srgb,${SILK_MID} 70%,currentColor)`
+const PAGE_SILK_SOFT = `color-mix(in srgb,${SILK_MID} 18%,transparent)`
+
+/** Page font, size, weight and colour are inherited; only a very light mark is added. */
+function innerStyle(style: BilingualStyle): string {
+  const base = 'all:unset;display:inline;'
+  if (style === 'highlight') {
+    return `${base}background:${PAGE_SILK_SOFT};border-radius:.25em;padding:.04em .22em;-webkit-box-decoration-break:clone;box-decoration-break:clone;`
+  }
+  if (style === 'dashed') {
+    return `${base}text-decoration:underline dashed color-mix(in srgb,currentColor 45%,transparent);text-decoration-thickness:1px;text-underline-offset:.32em;`
+  }
+  return `${base}text-decoration:underline dotted ${PAGE_SILK};text-decoration-thickness:1px;text-underline-offset:.32em;`
+}
+
+export interface RenderOptions {
+  readonly style: BilingualStyle
+  /** Target language code, set as `lang` so the browser picks matching glyphs (Traditional / Simplified). */
+  readonly lang?: string
+  /** Start delay for the fade-in of a newly created bilingual translation; undefined = no animation. */
+  readonly revealDelay?: number
+}
+
+const prefersReducedMotion = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+/** Fade in, rising 2 px (only opacity and transform). Reduced motion: a short fade only. */
+function reveal(el: HTMLElement, delay: number): void {
+  if (typeof el.animate !== 'function') return
+  const isReduced = prefersReducedMotion()
+  el.animate(isReduced ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }], {
+    duration: isReduced ? 120 : 180,
+    delay: isReduced ? 0 : delay,
+    easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+    fill: 'backwards',
+  })
+}
+
+function ensureTranslationElement(unit: Unit, translation: string, options: RenderOptions): void {
   if (unit.transEl?.isConnected) {
-    ;(unit.transEl.firstElementChild as HTMLElement | null)?.setAttribute('style', innerStyle(style))
+    ;(unit.transEl.firstElementChild as HTMLElement | null)?.setAttribute('style', innerStyle(options.style))
     return
   }
   const last = unit.run.nodes[unit.run.nodes.length - 1]
@@ -99,16 +143,18 @@ function ensureTranslationElement(unit: Unit, translation: string, style: Biling
   outer.setAttribute('translate', 'no')
   outer.className = 'notranslate'
   outer.setAttribute('style', outerStyle(prefersInline(unit)))
+  if (options.lang) outer.setAttribute('lang', options.lang)
   const inner = doc.createElement(TRANSLATION_INNER_TAG)
-  inner.setAttribute('style', innerStyle(style))
+  inner.setAttribute('style', innerStyle(options.style))
   inner.append(buildTranslationFragment(unit.ser, translation, doc))
   outer.append(inner)
   unit.run.parent.insertBefore(outer, last.nextSibling)
   unit.transEl = outer
+  if (options.revealDelay !== undefined) reveal(outer, options.revealDelay)
 }
 
 /** Renders a unit for `mode` purely from cached data. */
-export function renderUnit(unit: Unit, mode: DisplayMode, style: BilingualStyle): void {
+export function renderUnit(unit: Unit, mode: DisplayMode, options: RenderOptions): void {
   const translation = unit.translation
   if (mode === 'original' || !translation) {
     restoreUnit(unit)
@@ -121,7 +167,7 @@ export function renderUnit(unit: Unit, mode: DisplayMode, style: BilingualStyle)
     return
   }
   restoreUnit(unit)
-  ensureTranslationElement(unit, translation, style)
+  ensureTranslationElement(unit, translation, options)
 }
 
 export function isUnitAttached(unit: Unit): boolean {

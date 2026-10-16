@@ -95,6 +95,12 @@ function assertManifest(version) {
   ]
   const missing = required.filter((file) => !statSync(join(DIST, file), { throwIfNoEntry: false }))
   if (missing.length) throw new Error(`dist/ is missing: ${missing.join(', ')}`)
+  for (const key of new Set([...JSON.stringify(manifest).matchAll(/__MSG_(\w+)__/g)].map(([, key]) => key))) {
+    for (const locale of readdirSync(join(DIST, '_locales'))) {
+      const messages = JSON.parse(readFileSync(join(DIST, '_locales', locale, 'messages.json'), 'utf8'))
+      if (!messages[key]?.message) throw new Error(`_locales/${locale} is missing "${key}"`)
+    }
+  }
   const maps = listFiles(DIST).filter((file) => file.endsWith('.map'))
   if (maps.length) throw new Error(`source maps must not ship: ${maps.join(', ')}`)
 }

@@ -1,0 +1,18 @@
+{
+  "appName": {
+    "message": "丝译 Silk Translate",
+    "description": "Extension name in the browser and the store."
+  },
+  "appNameBeta": {
+    "message": "丝译 Silk Translate Beta",
+    "description": "Extension name of beta builds."
+  },
+  "appShortName": {
+    "message": "丝译",
+    "description": "Short name where space is tight."
+  },
+  "appDescription": {
+    "message": "无痕网页翻译 · Silk AI 云端翻译 · 双语对照 · 划词翻译。",
+    "description": "Store and extensions-page description. Do not name models that are not available yet."
+  }
+}

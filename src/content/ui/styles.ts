@@ -1,50 +1,29 @@
-/** Lives inside a shadow root: page CSS can't reach in, and nothing here leaks out. */
+import { tokenCss } from '../../shared/design-tokens.mjs'
+
+/**
+ * Lives inside a shadow root: page CSS can't reach in, and nothing here leaks out. Colours, type,
+ * shape and motion come from the Silk & Ink tokens (docs/DESIGN.md); no colour values here.
+ */
 export const UI_CSS = /* css */ `
 :host { all: initial; }
 *, *::before, *::after { box-sizing: border-box; }
 
+${tokenCss('.layer')}
+
 .layer {
-  --ink: #17181c;
-  --muted: #646a73;
-  --faint: #979ca5;
-  --surface: rgba(255, 255, 255, 0.86);
-  --solid: #ffffff;
-  --line: rgba(17, 19, 26, 0.09);
-  --hover: rgba(17, 19, 26, 0.055);
-  --accent: #0f8b7a;
-  --accent-ink: #ffffff;
-  --accent-soft: rgba(15, 139, 122, 0.12);
-  --danger: #d6455d;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 14px 36px -10px rgba(16, 24, 40, 0.28);
   position: fixed;
   inset: 0;
   pointer-events: none;
-  font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font: 13px/20px var(--font-ui);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
   letter-spacing: 0;
 }
-@media (prefers-color-scheme: dark) {
-  .layer {
-    --ink: #eceef2;
-    --muted: #a5abb4;
-    --faint: #767c86;
-    --surface: rgba(28, 30, 35, 0.84);
-    --solid: #2b2e35;
-    --line: rgba(255, 255, 255, 0.09);
-    --hover: rgba(255, 255, 255, 0.07);
-    --accent: #34c7ae;
-    --accent-ink: #052019;
-    --accent-soft: rgba(52, 199, 174, 0.16);
-    --danger: #ff7a8e;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 18px 44px -12px rgba(0, 0, 0, 0.65);
-  }
-}
 
 .glass {
   background: var(--surface);
-  -webkit-backdrop-filter: blur(22px) saturate(1.7);
-  backdrop-filter: blur(22px) saturate(1.7);
+  -webkit-backdrop-filter: blur(22px) saturate(1.6);
+  backdrop-filter: blur(22px) saturate(1.6);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
 }
@@ -55,30 +34,31 @@ button { font: inherit; }
   width: 28px;
   height: 28px;
   flex: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
-  color: var(--faint);
+  color: var(--muted);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--dur-fast) var(--ease-silk), color var(--dur-fast) var(--ease-silk);
 }
 .icon-btn:hover { background: var(--hover); color: var(--ink); }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .icon-btn svg { width: 15px; height: 15px; }
-.icon-btn.is-ok { color: var(--accent); }
+.icon-btn.is-ok { color: var(--ok); }
+.icon-btn.is-on { color: var(--accent); }
 
 /* ───────── HUD (floating mode switcher) ───────── */
 .hud {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
+  right: 16px;
+  bottom: 16px;
   pointer-events: auto;
   display: flex;
   align-items: center;
   padding: 4px;
   border-radius: 999px;
   transform-origin: right bottom;
-  animation: pop-in 0.32s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  animation: rise-in var(--dur-slow) var(--ease-silk);
 }
 .hud[hidden] { display: none; }
 .badge {
@@ -89,13 +69,23 @@ button { font: inherit; }
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--solid);
+  border: 1px solid var(--line);
+  color: var(--accent);
 }
-.badge > svg:first-child { width: 16px; height: 16px; }
-.ring { position: absolute; inset: -3px; width: 38px; height: 38px; transform: rotate(-90deg); }
-.ring circle { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; opacity: 0.35; transition: stroke-dashoffset 0.35s ease; }
+.badge > svg:first-child { width: 15px; height: 15px; }
+/* Silk progress: a gold thread woven around the badge, gathered into a point when done. */
+.ring { position: absolute; inset: -4px; width: 38px; height: 38px; transform: rotate(-90deg); overflow: visible; }
+.ring circle {
+  fill: none;
+  stroke: var(--silk);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0;
+  transition: stroke-dashoffset var(--dur-slow) var(--ease-silk), opacity var(--dur) var(--ease-out);
+}
 .hud.is-working .ring circle { opacity: 1; }
+.hud.is-done .ring circle { animation: silk-gather 640ms var(--ease-out) forwards; }
 .hud-body {
   display: flex;
   align-items: center;
@@ -104,11 +94,12 @@ button { font: inherit; }
   padding-left: 8px;
   overflow: hidden;
   white-space: nowrap;
-  transition: max-width 0.35s cubic-bezier(0.3, 0.9, 0.3, 1), opacity 0.25s, padding 0.35s;
+  transition: max-width var(--dur-slow) var(--ease-silk), opacity var(--dur) var(--ease-out), padding var(--dur-slow) var(--ease-silk);
 }
 .hud.is-collapsed:not(:hover):not(:focus-within) .hud-body { max-width: 0; opacity: 0; padding-left: 0; }
 .status {
   font-size: 12px;
+  line-height: 16px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   max-width: 150px;
@@ -121,19 +112,20 @@ button { font: inherit; }
   display: flex;
   padding: 2px;
   border-radius: 999px;
-  background: var(--hover);
+  background: var(--field);
 }
 .seg button {
   all: unset;
   position: relative;
   z-index: 1;
-  padding: 4px 11px;
+  padding: 4px 12px;
   font-size: 12px;
+  line-height: 16px;
   font-weight: 550;
   color: var(--muted);
   border-radius: 999px;
   cursor: pointer;
-  transition: color 0.2s;
+  transition: color var(--dur) var(--ease-silk);
 }
 .seg button:hover { color: var(--ink); }
 .seg button[aria-checked="true"] { color: var(--ink); }
@@ -145,8 +137,8 @@ button { font: inherit; }
   left: 0;
   border-radius: 999px;
   background: var(--solid);
-  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.14), 0 0 0 0.5px var(--line);
-  transition: transform 0.3s cubic-bezier(0.3, 0.9, 0.3, 1), width 0.3s cubic-bezier(0.3, 0.9, 0.3, 1);
+  border: 1px solid var(--line);
+  transition: transform var(--dur) var(--ease-silk), width var(--dur) var(--ease-silk);
 }
 .retry-btn {
   all: unset;
@@ -154,11 +146,12 @@ button { font: inherit; }
   align-items: center;
   gap: 4px;
   font-size: 12px;
+  line-height: 16px;
   font-weight: 550;
   color: var(--danger);
   padding: 4px 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--danger) 11%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
   cursor: pointer;
 }
 .retry-btn svg { width: 12px; height: 12px; }
@@ -169,88 +162,109 @@ button { font: inherit; }
   all: unset;
   position: fixed;
   pointer-events: auto;
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
   color: var(--accent);
   cursor: pointer;
-  animation: pop-in 0.18s cubic-bezier(0.2, 0.9, 0.25, 1.2);
-  transition: background 0.15s, color 0.15s, transform 0.15s;
+  animation: card-in var(--dur) var(--ease-silk);
+  transition: background var(--dur-fast) var(--ease-silk), color var(--dur-fast) var(--ease-silk);
 }
-.trigger:hover { background: var(--accent); color: var(--accent-ink); transform: translateY(-1px); }
-.trigger svg { width: 16px; height: 16px; }
+.trigger:hover { background: var(--accent); color: var(--accent-ink); }
+.trigger svg { width: 15px; height: 15px; }
 .trigger[hidden], .card[hidden] { display: none; }
 
 .card {
   position: fixed;
   pointer-events: auto;
-  width: 368px;
+  width: 360px;
   max-width: calc(100vw - 24px);
-  border-radius: 16px;
+  border-radius: var(--radius);
   overflow: hidden;
-  animation: card-in 0.24s cubic-bezier(0.2, 0.9, 0.25, 1);
+  transform-origin: left top;
+  animation: card-in var(--dur) var(--ease-silk);
 }
-.card-head { display: flex; align-items: center; gap: 2px; padding: 10px 8px 6px 14px; }
+.card.is-above { transform-origin: left bottom; }
+.card-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 4px 16px; }
 .chip {
   font-size: 11.5px;
-  font-weight: 600;
+  line-height: 16px;
+  font-weight: 550;
   color: var(--accent);
   background: var(--accent-soft);
-  padding: 2px 9px;
+  padding: 2px 8px;
   border-radius: 999px;
   margin-right: auto;
 }
 .source {
-  margin: 0 14px;
-  padding-left: 9px;
-  border-left: 2px solid var(--line);
+  margin: 0 16px;
   color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.55;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  font-size: 11.5px;
+  line-height: 16px;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
+/* The card's only decoration: a short gold thread between the original and the translation. */
+.silk-rule { width: 24px; height: 1px; margin: 8px 16px 0; background: var(--silk); }
 .result {
-  padding: 10px 14px 14px;
-  font-size: 14.5px;
-  line-height: 1.7;
+  padding: 8px 16px 4px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 22px;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: min(340px, 50vh);
   overflow: auto;
   overscroll-behavior: contain;
 }
-.result.is-error { color: var(--danger); font-size: 13px; }
+.result.is-error { color: var(--danger); font-size: 13px; line-height: 20px; }
+.card-foot { display: flex; align-items: center; gap: 2px; padding: 4px 8px 8px; }
+/* Streaming cursor: a short gold thread that blinks. */
 .caret {
   display: inline-block;
-  width: 6px;
-  height: 1.05em;
-  margin-left: 2px;
-  vertical-align: -0.17em;
-  border-radius: 2px;
-  background: var(--accent);
+  width: 10px;
+  height: 2px;
+  margin-left: 3px;
+  vertical-align: baseline;
+  border-radius: 1px;
+  background: var(--silk);
   animation: blink 1s steps(2, start) infinite;
 }
-.skeleton { display: grid; gap: 9px; padding: 6px 0 2px; }
-.skeleton i {
-  display: block;
-  height: 10px;
-  border-radius: 6px;
-  background: linear-gradient(90deg, var(--hover) 25%, var(--line) 50%, var(--hover) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.3s linear infinite;
+/* Loading: a gold thread sweeping left to right. */
+.loader {
+  position: relative;
+  height: 2px;
+  margin: 12px 0 10px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--silk-soft);
 }
-.skeleton i:last-child { width: 62%; }
+.loader::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--silk), transparent);
+  animation: sweep 1.2s var(--ease-silk) infinite;
+}
 
-@keyframes pop-in { from { opacity: 0; transform: scale(0.82); } }
-@keyframes card-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(4px); } }
+@keyframes card-in { from { opacity: 0; transform: scale(0.96); } }
 @keyframes blink { to { visibility: hidden; } }
-@keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+@keyframes silk-gather {
+  0% { opacity: 1; stroke-dashoffset: 0; }
+  70% { opacity: 1; stroke-dasharray: 0.01 120; stroke-dashoffset: -106.8; }
+  100% { opacity: 0; stroke-dasharray: 0.01 120; stroke-dashoffset: -106.8; }
+}
+@keyframes fade-in { from { opacity: 0; } }
+/* Reduced motion: no movement or scaling, at most a 120 ms fade; the loader stands still. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+  .hud, .card, .trigger { animation: fade-in var(--dur-fast) linear !important; }
+  .loader::after { left: 30%; }
 }
 `

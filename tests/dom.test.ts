@@ -126,18 +126,37 @@ describe('unit rendering', () => {
     expect(unit.key).toBe('Click <g0>here</g0> to continue reading this article.')
     setTranslation(unit, '点击<g0>这里</g0>继续阅读本文。')
 
-    renderUnit(unit, 'overlay', 'dashed')
+    renderUnit(unit, 'overlay', { style: 'dashed' })
     expect(p.innerHTML).toBe('点击<a href="/go">这里</a>继续阅读本文。')
 
-    renderUnit(unit, 'bilingual', 'highlight')
+    renderUnit(unit, 'bilingual', { style: 'highlight', lang: 'zh-CN', revealDelay: 30 })
     expect(p.firstChild?.nodeValue).toBe('Click ')
     const trans = p.querySelector('silk-trans')!
     expect(trans.textContent).toBe('点击这里继续阅读本文。')
     expect(trans.querySelector('a')?.getAttribute('href')).toBe('/go')
     expect(trans.getAttribute('style')).toContain('display:block')
+    expect(trans.getAttribute('lang')).toBe('zh-CN')
 
-    renderUnit(unit, 'original', 'dashed')
+    renderUnit(unit, 'original', { style: 'dashed' })
     expect(p.innerHTML).toBe(before)
+  })
+
+  it('marks bilingual translations lightly: silk dotted underline, dashed, or a silk highlight', () => {
+    document.body.innerHTML = `<p id="p">Read the full article before you comment.</p>`
+    const p = document.getElementById('p')!
+    const unit = createUnit(collect(p).get(p)![0], 'zh-TW')!
+    setTranslation(unit, '留言前請先讀完整篇文章。')
+    const innerStyle = (style: 'silk' | 'dashed' | 'highlight') => {
+      renderUnit(unit, 'bilingual', { style })
+      return p.querySelector('silk-t')!.getAttribute('style') ?? ''
+    }
+    // Inherits the page's font and colour: only a decoration, no colours of its own for the text.
+    expect(innerStyle('silk')).toMatch(/text-decoration:underline dotted color-mix\(.*currentColor\)/)
+    expect(innerStyle('silk')).toContain('text-underline-offset:.32em')
+    expect(innerStyle('silk')).not.toMatch(/(^|;)(color|font|background):/)
+    expect(innerStyle('dashed')).toContain('underline dashed')
+    expect(innerStyle('highlight')).toMatch(/background:color-mix\(in srgb,#c49b56 18%,transparent\)/)
+    expect(innerStyle('highlight')).not.toContain('#f6c445')
   })
 
   it('skips runs that are already in the target language or not translatable', () => {

@@ -1,10 +1,11 @@
 import { UI_LANG_SETTINGS, type MessageKey, type UiLangSetting } from './i18n'
-import { isKnownLanguage } from './languages'
+import { defaultTargetLang, isKnownLanguage } from './languages'
 import { isValidShortcut } from './shortcut'
 
 export type DisplayMode = 'original' | 'overlay' | 'bilingual'
 export type TranslateMode = Exclude<DisplayMode, 'original'>
-export type BilingualStyle = 'dashed' | 'highlight'
+export type BilingualStyle = 'silk' | 'dashed' | 'highlight'
+export const BILINGUAL_STYLES: readonly BilingualStyle[] = ['silk', 'dashed', 'highlight']
 export type DomainRule = 'always' | 'never'
 
 /**
@@ -33,6 +34,8 @@ export interface Settings {
   readonly targetLang: string
   readonly defaultMode: TranslateMode
   readonly bilingualStyle: BilingualStyle
+  /** Bilingual translations fade in as they arrive (docs/DESIGN.md §6); some readers find motion distracting. */
+  readonly animateTranslations: boolean
   readonly shortcut: string
   readonly selectionEnabled: boolean
   readonly domainRules: Readonly<Record<string, DomainRule>>
@@ -43,12 +46,14 @@ export function engineId(settings: Settings): string {
   return `cloud:${settings.model}`
 }
 
+/** Defaults; `targetLang` is replaced by the browser's Chinese variant (see defaultTargetLang) when nothing is stored. */
 export const DEFAULT_SETTINGS: Settings = {
   model: DEFAULT_MODEL,
   uiLang: 'auto',
   targetLang: 'zh-CN',
   defaultMode: 'overlay',
-  bilingualStyle: 'dashed',
+  bilingualStyle: 'silk',
+  animateTranslations: true,
   shortcut: 'Alt+T',
   selectionEnabled: true,
   domainRules: {},
@@ -79,9 +84,11 @@ export function sanitizeSettings(raw: unknown): Settings {
   return {
     model: pickEnum(src.model, MODEL_IDS, DEFAULT_MODEL),
     uiLang: pickEnum(src.uiLang, UI_LANG_SETTINGS, DEFAULT_SETTINGS.uiLang),
-    targetLang: isKnownLanguage(src.targetLang) ? src.targetLang : DEFAULT_SETTINGS.targetLang,
+    targetLang: isKnownLanguage(src.targetLang) ? src.targetLang : defaultTargetLang(),
     defaultMode: pickEnum(src.defaultMode, ['overlay', 'bilingual'] as const, 'overlay'),
-    bilingualStyle: pickEnum(src.bilingualStyle, ['dashed', 'highlight'] as const, 'dashed'),
+    // Installs that already chose a style keep it; only new ones (nothing stored) get silk.
+    bilingualStyle: pickEnum(src.bilingualStyle, BILINGUAL_STYLES, DEFAULT_SETTINGS.bilingualStyle),
+    animateTranslations: typeof src.animateTranslations === 'boolean' ? src.animateTranslations : true,
     shortcut: isValidShortcut(src.shortcut) ? src.shortcut : DEFAULT_SETTINGS.shortcut,
     selectionEnabled: typeof src.selectionEnabled === 'boolean' ? src.selectionEnabled : true,
     domainRules: sanitizeDomainRules(src.domainRules),

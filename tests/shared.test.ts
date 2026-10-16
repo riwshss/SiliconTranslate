@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { resolveUiLang, translator } from '../src/shared/i18n'
+import { compactNumber, errorText, MESSAGE_KEYS, resolveUiLang, translator } from '../src/shared/i18n'
 import { CLOUD_MODELS, DEFAULT_SETTINGS, dropLegacySettings, engineId, MAX_CONCURRENCY, sanitizeSettings, withDomainRule } from '../src/shared/settings'
 import { eventToShortcut, isValidShortcut, matchesShortcut } from '../src/shared/shortcut'
-import { getLanguage } from '../src/shared/languages'
+import { chineseTargetFor, defaultTargetLang, getLanguage } from '../src/shared/languages'
 import { contentScriptMatches, sitePattern } from '../src/shared/site-access'
 
 const key = (code: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}) => ({
@@ -28,6 +28,7 @@ describe('sanitizeSettings', () => {
       targetLang: 'ja',
       defaultMode: 'bilingual',
       bilingualStyle: 'highlight',
+      animateTranslations: false,
       shortcut: 'Ctrl+Shift+Y',
       selectionEnabled: false,
       domainRules: { 'example.com': 'always', 'bad host!': 'always', 'x.org': 'sometimes' },
@@ -38,10 +39,21 @@ describe('sanitizeSettings', () => {
       targetLang: 'ja',
       defaultMode: 'bilingual',
       bilingualStyle: 'highlight',
+      animateTranslations: false,
       shortcut: 'Ctrl+Shift+Y',
       selectionEnabled: false,
       domainRules: { 'example.com': 'always' },
     })
+  })
+
+  it('gives new installs the silk bilingual style but keeps the style earlier installs chose', () => {
+    expect(DEFAULT_SETTINGS.bilingualStyle).toBe('silk')
+    expect(sanitizeSettings({}).bilingualStyle).toBe('silk')
+    expect(sanitizeSettings({ bilingualStyle: 'dashed' }).bilingualStyle).toBe('dashed')
+    expect(sanitizeSettings({ bilingualStyle: 'highlight' }).bilingualStyle).toBe('highlight')
+    expect(sanitizeSettings({ bilingualStyle: 'neon' }).bilingualStyle).toBe('silk')
+    expect(sanitizeSettings({}).animateTranslations).toBe(true)
+    expect(sanitizeSettings({ animateTranslations: 'no' }).animateTranslations).toBe(true)
   })
 
   it('rejects unsafe or invalid values', () => {
@@ -135,7 +147,11 @@ describe('languages', () => {
 
 describe('i18n', () => {
   it('follows the browser for auto: Chinese locales get Chinese, everything else English', () => {
-    expect(resolveUiLang('auto', 'zh-TW')).toBe('zh-CN')
+    expect(resolveUiLang('auto', 'zh-CN')).toBe('zh-CN')
+    expect(resolveUiLang('auto', 'zh')).toBe('zh-CN')
+    expect(resolveUiLang('auto', 'zh-SG')).toBe('zh-CN')
+    for (const tag of ['zh-TW', 'zh-HK', 'zh-MO', 'zh-Hant', 'zh-Hant-TW']) expect(resolveUiLang('auto', tag)).toBe('zh-TW')
+    expect(resolveUiLang('auto', 'zhx')).toBe('en')
     expect(resolveUiLang('auto', 'en-US')).toBe('en')
     expect(resolveUiLang('auto', 'ja')).toBe('en')
     expect(resolveUiLang('en', 'zh-CN')).toBe('en')
@@ -144,6 +160,35 @@ describe('i18n', () => {
   it('fills placeholders', () => {
     expect(translator('en')('pageTranslating', { done: 3, total: 9 })).toBe('Translating 3/9')
     expect(translator('zh-CN')('pageFailed', { n: 2 })).toBe('2 段失败')
+    expect(translator('zh-TW')('pageFailed', { n: 2 })).toBe('2 段失敗')
+  })
+
+  it('writes the Traditional Chinese interface in Taiwan wording, not converted Simplified', () => {
+    const zhTw = translator('zh-TW')
+    expect(zhTw('appName')).toBe('絲譯')
+    expect(errorText('zh-TW', 'bad-response', 'missedItems')).toBe('無法解讀模型回傳的內容：模型漏翻了部分段落')
+    expect(compactNumber('zh-TW', 100000)).toBe('10萬')
+    // Characters that only exist in Simplified Chinese, and Mainland terms Taiwan readers notice.
+    const simplifiedOnly = /[译页网设语启键时间这线务据账号关闭显载连读户复认击态择]/
+    const mainlandTerms = ['视频', '軟件', '默認', '設置', '信息', '界面', '用戶', '登錄', '鏈接', '質量', '網絡']
+    for (const key of MESSAGE_KEYS) {
+      const text = zhTw(key)
+      expect(text, key).not.toMatch(simplifiedOnly)
+      for (const term of mainlandTerms) expect(text, `${key}: ${term}`).not.toContain(term)
+    }
+  })
+
+  it('picks the default target from the first Chinese variant among the browser languages', () => {
+    expect(chineseTargetFor('zh-TW')).toBe('zh-TW')
+    expect(chineseTargetFor('zh-Hant-HK')).toBe('zh-HK')
+    expect(chineseTargetFor('zh-MO')).toBe('zh-HK')
+    expect(chineseTargetFor('zh-Hant')).toBe('zh-TW')
+    expect(chineseTargetFor('zh')).toBe('zh-CN')
+    expect(chineseTargetFor('en-US')).toBeNull()
+    expect(defaultTargetLang(['en-US', 'zh-TW', 'zh-CN'])).toBe('zh-TW')
+    expect(defaultTargetLang(['zh-HK', 'en'])).toBe('zh-HK')
+    expect(defaultTargetLang(['en-US', 'ja'])).toBe('zh-CN')
+    expect(defaultTargetLang([])).toBe('zh-CN')
   })
 })
 

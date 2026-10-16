@@ -4,13 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>丝译 Silk Translate</title>
+    <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main class="app">
       <header class="top">
         <div class="brand">
-          <img class="logo" src="icons/icon-128.png" alt="" width="34" height="34" />
+          <img class="logo" src="icons/logo-56.png" alt="" width="28" height="28" />
           <div>
             <h1><span data-i18n="appName"></span> <span id="beta-badge" class="badge">Beta</span></h1>
             <p data-i18n="tagline"></p>
@@ -42,6 +43,7 @@
           </div>
         </div>
         <p id="page-note" class="note" hidden></p>
+        <div id="page-progress" class="silk-progress" hidden><i></i></div>
       </section>
 
       <section class="card">
@@ -53,6 +55,7 @@
           <button id="test-btn" class="secondary" type="button" data-i18n="checkQuota"></button>
           <span id="test-result" class="small" aria-live="polite"></span>
         </div>
+        <div id="quota-meter" class="meter" hidden><i></i></div>
       </section>
 
       <section class="card">
@@ -71,10 +74,15 @@
         <div class="field">
           <span data-i18n="bilingualStyle"></span>
           <div id="style-seg" class="seg seg-sm" role="radiogroup" data-i18n-aria="bilingualStyle">
+            <button type="button" role="radio" data-value="silk"><u class="demo-silk" data-i18n="styleSilk"></u></button>
             <button type="button" role="radio" data-value="dashed"><u class="demo-dashed" data-i18n="styleDashed"></u></button>
             <button type="button" role="radio" data-value="highlight"><mark class="demo-mark" data-i18n="styleHighlight"></mark></button>
           </div>
         </div>
+        <label class="field">
+          <span data-i18n="animateTranslations"></span>
+          <span class="switch"><input id="animate" type="checkbox" /><i></i></span>
+        </label>
         <label class="field">
           <span data-i18n="selection"></span>
           <span class="switch"><input id="selection" type="checkbox" /><i></i></span>

@@ -1,12 +1,14 @@
-// Interface strings in Simplified Chinese and English. `uiLang: 'auto'` follows the browser:
-// any Chinese locale gets Chinese, everything else English.
+// Interface strings in Simplified Chinese, Traditional Chinese (Taiwan usage) and English.
+// `uiLang: 'auto'` follows the browser: zh-TW / zh-HK / zh-MO / zh-Hant get Traditional Chinese,
+// other Chinese locales Simplified Chinese, everything else English. The Traditional strings are
+// written in Taiwan wording, not converted from the Simplified ones.
 
 import type { ErrorCode } from './messages'
 
-export type UiLang = 'zh-CN' | 'en'
+export type UiLang = 'zh-CN' | 'zh-TW' | 'en'
 export type UiLangSetting = 'auto' | UiLang
 
-export const UI_LANG_SETTINGS: readonly UiLangSetting[] = ['auto', 'zh-CN', 'en']
+export const UI_LANG_SETTINGS: readonly UiLangSetting[] = ['auto', 'zh-TW', 'zh-CN', 'en']
 
 const ZH = {
   appName: '丝译',
@@ -28,6 +30,8 @@ const ZH = {
   bilingualStyle: '双语样式',
   styleDashed: '虚线',
   styleHighlight: '高亮',
+  styleSilk: '丝线',
+  animateTranslations: '译文浮现动画',
   selection: '划词翻译',
   allSites: '在所有网站启用',
   allSitesHint: '开启后划词翻译、快捷键和“总是翻译”在每个网页都能直接用；关闭时只在点过“翻译此页”的标签页生效',
@@ -69,6 +73,7 @@ const ZH = {
   planBeta: '测试版 · 全部免费',
   planFree: '免费版',
   planPro: '专业版',
+  planDev: '开发者 · 无限制',
   quotaToday: '今日已用 {used} / {limit} 字',
   hudAria: '丝译 翻译控制',
   hudOriginal: '原文',
@@ -84,6 +89,7 @@ const ZH = {
   selTranslating: '翻译中…',
   copy: '复制译文',
   speak: '朗读译文',
+  swapDirection: '切换翻译方向',
   close: '关闭',
   closeTitle: '关闭 (Esc)',
   extensionGone: '扩展已更新或被禁用，请刷新页面',
@@ -96,6 +102,7 @@ const ZH = {
   badAccount: '账户信息格式错误',
   emptyReply: '空响应',
   'error.quota': '今日免费额度已用完，北京时间早上 8 点（UTC 0 点）恢复',
+  'error.install-limit': '你所在的网络今天新安装的次数已达上限（常见于公司、学校等多人共用的网络），请明天再试',
   'error.upgrade': '当前套餐不包含 Silk AI 云端翻译',
   'error.model-locked': '当前套餐不能使用这个模型，已改用可用的模型，请重试',
   'error.auth': '扩展身份校验失败，请重新加载扩展',
@@ -109,6 +116,8 @@ const ZH = {
 } as const
 
 export type MessageKey = keyof typeof ZH
+
+export const MESSAGE_KEYS = Object.keys(ZH) as MessageKey[]
 
 const EN: Record<MessageKey, string> = {
   appName: 'Silk Translate',
@@ -130,6 +139,8 @@ const EN: Record<MessageKey, string> = {
   bilingualStyle: 'Bilingual style',
   styleDashed: 'Dashed',
   styleHighlight: 'Highlight',
+  styleSilk: 'Silk',
+  animateTranslations: 'Fade in translations',
   selection: 'Translate selection',
   allSites: 'Run on all sites',
   allSitesHint: 'Selection translation, the shortcut and "Always" then work on every page. Off: only in tabs where you clicked Translate this page',
@@ -171,6 +182,7 @@ const EN: Record<MessageKey, string> = {
   planBeta: 'Beta · everything free',
   planFree: 'Free',
   planPro: 'Pro',
+  planDev: 'Developer · unlimited',
   quotaToday: 'Used today: {used} / {limit} characters',
   hudAria: 'Silk Translate controls',
   hudOriginal: 'Original',
@@ -186,6 +198,7 @@ const EN: Record<MessageKey, string> = {
   selTranslating: 'Translating…',
   copy: 'Copy translation',
   speak: 'Read aloud',
+  swapDirection: 'Translate the other way',
   close: 'Close',
   closeTitle: 'Close (Esc)',
   extensionGone: 'The extension was updated or disabled. Reload the page',
@@ -198,6 +211,7 @@ const EN: Record<MessageKey, string> = {
   badAccount: 'Unreadable account information',
   emptyReply: 'empty response',
   'error.quota': "Today's free quota is used up. It resets at 00:00 UTC",
+  'error.install-limit': 'Too many new installs from your network today (common on shared office or school networks). Please try again tomorrow',
   'error.upgrade': 'Your plan does not include Silk AI cloud translation',
   'error.model-locked': 'This model is not available on your plan. Switched to an available one; try again',
   'error.auth': 'The extension could not identify itself. Reload the extension',
@@ -210,7 +224,112 @@ const EN: Record<MessageKey, string> = {
   'error.extension': 'The extension was updated. Reload the page',
 }
 
-const MESSAGES: Record<UiLang, Record<MessageKey, string>> = { 'zh-CN': ZH, en: EN }
+const ZH_TW: Record<MessageKey, string> = {
+  appName: '絲譯',
+  tagline: '無痕網頁翻譯 · Silk AI 雲端引擎',
+  translatePage: '翻譯這個網頁',
+  displayMode: '顯示模式',
+  modeOriginal: '原文',
+  modeOverlayOnly: '只看譯文',
+  modeBilingual: '雙語對照',
+  thisSite: '這個網站',
+  siteRules: '網站規則',
+  ruleDefault: '預設',
+  ruleAlways: '一律翻譯',
+  ruleNever: '永不',
+  prefsTitle: '翻譯偏好',
+  targetLang: '目標語言',
+  defaultMode: '預設模式',
+  modeOverlay: '取代原文',
+  bilingualStyle: '雙語樣式',
+  styleDashed: '虛線',
+  styleHighlight: '螢光標示',
+  styleSilk: '絲線',
+  animateTranslations: '譯文浮現動畫',
+  selection: '選取文字翻譯',
+  allSites: '在所有網站啟用',
+  allSitesHint: '開啟後，選取文字翻譯、快速鍵和「一律翻譯」在每個網頁都能直接使用；關閉時只在按過「翻譯這個網頁」的分頁有效',
+  shortcut: '切換快速鍵',
+  shortcutTitle: '點一下，再按下新的按鍵組合',
+  shortcutHint: '快速鍵會依序切換：原文 → 預設模式 → 另一種模式',
+  shortcutRecording: '請按下按鍵組合…',
+  shortcutInvalid: '需要包含 Ctrl / Alt / ⌘',
+  uiLanguage: '介面語言',
+  uiAuto: '跟隨瀏覽器',
+  modelTitle: 'AI 模型',
+  modelLabel: '翻譯模型',
+  modelCheapest: '最便宜 · 中文強',
+  modelFast: '快速',
+  modelLocked: '正式版開放',
+  modelsBetaHint: '測試期間只開放最便宜的 DeepSeek V4 Flash，其他模型會在正式版開放。',
+  modelBest: '品質最好',
+  modelBalanced: '均衡',
+  modelNote: 'Silk AI 透過 OpenRouter 呼叫你選的模型，安裝即可使用，不需要 API 金鑰。測試期間免費，每天有免費額度。翻譯時網頁文字會傳送到 Silk 翻譯服務處理。',
+  checkQuota: '查看額度',
+  help: '使用說明 ↗',
+  saved: '已儲存',
+  connIdle: '未連線',
+  connChecking: '檢查中',
+  connReady: '可使用',
+  connUpgrade: '需要升級',
+  connQuota: '額度用完',
+  connFailed: '連線失敗',
+  pageFailed: '{n} 段失敗',
+  pageTranslating: '翻譯中 {done}/{total}',
+  pageTranslated: '已翻譯 {n} 段',
+  pageKind: '{kind} 頁面',
+  pageUnsupported: '瀏覽器內建頁面無法翻譯',
+  pageCannotRun: '無法在這個網頁執行翻譯，請重新整理後再試一次',
+  saveFailed: '設定儲存失敗，請再試一次',
+  popupFailed: '面板載入失敗，請重新開啟',
+  backgroundUnreachable: '無法連線到擴充功能背景程式，請重新開啟面板',
+  checkFailed: '查詢失敗',
+  planBeta: '測試版 · 全部免費',
+  planFree: '免費版',
+  planPro: '專業版',
+  planDev: '開發者 · 無限制',
+  quotaToday: '今天已用 {used} / {limit} 字',
+  hudAria: '絲譯 翻譯控制',
+  hudOriginal: '原文',
+  hudOverlay: '譯文',
+  hudBilingual: '雙語',
+  hudShowingOriginal: '顯示原文',
+  hudPending: '等待翻譯',
+  retry: '重試',
+  hide: '隱藏',
+  hideTitle: '隱藏（可用快速鍵再叫出來）',
+  selTrigger: '翻譯選取的文字',
+  selCard: '選取文字翻譯',
+  selTranslating: '翻譯中…',
+  copy: '複製譯文',
+  speak: '朗讀譯文',
+  swapDirection: '切換翻譯方向',
+  close: '關閉',
+  closeTitle: '關閉 (Esc)',
+  extensionGone: '擴充功能已更新或停用，請重新整理網頁',
+  portLost: '與擴充功能背景程式的連線中斷，請再試一次',
+  partialFail: '部分段落翻譯失敗',
+  invalidBatch: '無效的翻譯要求',
+  invalidSelection: '選取的文字是空的或太長',
+  timeout: '連線逾時（20 秒），請檢查網路或代理伺服器',
+  missedItems: '模型漏翻了部分段落',
+  badAccount: '帳號資訊格式錯誤',
+  emptyReply: '沒有回應內容',
+  'error.quota': '今天的免費額度已用完，台灣時間早上 8 點（UTC 0 點）恢復',
+  'error.install-limit': '你所在的網路今天新安裝的次數已達上限（公司、學校等多人共用的網路常會遇到），請明天再試',
+  'error.upgrade': '目前的方案不包含 Silk AI 雲端翻譯',
+  'error.model-locked': '目前的方案不能使用這個模型，已改用可用的模型，請再試一次',
+  'error.auth': '擴充功能身分驗證失敗，請重新載入擴充功能',
+  'error.rate-limit': '要求太頻繁（429），請稍後再試',
+  'error.bad-request': '要求被拒絕',
+  'error.network': '網路連線失敗，請檢查網路或代理伺服器',
+  'error.server': '翻譯服務暫時無法使用',
+  'error.bad-response': '無法解讀模型回傳的內容',
+  'error.aborted': '已取消',
+  'error.extension': '擴充功能已更新，請重新整理網頁',
+}
+
+const MESSAGES: Record<UiLang, Record<MessageKey, string>> = { 'zh-CN': ZH, 'zh-TW': ZH_TW, en: EN }
 
 export function isMessageKey(value: string): value is MessageKey {
   return Object.hasOwn(ZH, value)
@@ -219,7 +338,9 @@ export function isMessageKey(value: string): value is MessageKey {
 /** `auto` resolves against the browser language (popup, content script and service worker alike). */
 export function resolveUiLang(setting: UiLangSetting, browserLang: string = globalThis.navigator?.language ?? ''): UiLang {
   if (setting !== 'auto') return setting
-  return browserLang.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
+  const tag = browserLang.toLowerCase()
+  if (tag !== 'zh' && !tag.startsWith('zh-')) return 'en'
+  return /-(tw|hk|mo|hant)(-|$)/.test(tag) ? 'zh-TW' : 'zh-CN'
 }
 
 export type Translate = (key: MessageKey, params?: Readonly<Record<string, string | number>>) => string
@@ -233,7 +354,7 @@ export function errorText(lang: UiLang, code: ErrorCode, detail = ''): string {
   const t = translator(lang)
   const base = t(`error.${code}`)
   const extra = detail && isMessageKey(detail) ? t(detail) : detail
-  return extra ? `${base}${lang === 'zh-CN' ? '：' : ': '}${extra}` : base
+  return extra ? `${base}${lang === 'en' ? ': ' : '：'}${extra}` : base
 }
 
 /** "200万" / "2M" style counts. */

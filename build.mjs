@@ -1,5 +1,6 @@
 import { build, context } from 'esbuild'
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tokenCss } from './src/shared/design-tokens.mjs'
 
 // SILK_API_URL: Silk backend the cloud engine talks to (the deployed Cloudflare Worker).
 // SILK_CHANNEL: "beta" (default: everything unlocked, Beta in the name) or "stable".
@@ -46,7 +47,8 @@ function writeManifest() {
   const { protocol, hostname } = new URL(apiUrl)
   const apiHost = `${protocol}//${hostname}/*`
   const hosts = manifest.host_permissions.includes(apiHost) ? manifest.host_permissions : [...manifest.host_permissions, apiHost]
-  const beta = channel === 'beta' ? { name: `${manifest.name} Beta`, version_name: `${manifest.version} Beta` } : {}
+  // Names come from _locales (絲譯 / 丝译 / Silk Translate by browser language); beta builds use the "… Beta" message.
+  const beta = channel === 'beta' ? { name: '__MSG_appNameBeta__', version_name: `${manifest.version} Beta`, action: { ...manifest.action, default_title: '__MSG_appNameBeta__' } } : {}
   const next = { ...manifest, ...beta, host_permissions: hosts }
   writeFileSync(`${outdir}/manifest.json`, `${JSON.stringify(next, null, 2)}\n`)
 }
@@ -55,6 +57,8 @@ function copyStatic() {
   cpSync('static', outdir, { recursive: true })
   cpSync('src/popup/popup.html', `${outdir}/popup.html`)
   cpSync('src/popup/popup.css', `${outdir}/popup.css`)
+  // Same Silk & Ink tokens as the shadow-DOM UI (src/content/ui/styles.ts).
+  writeFileSync(`${outdir}/tokens.css`, `/* Generated from src/shared/design-tokens.mjs. */\n${tokenCss(':root')}\n`)
   writeManifest()
 }
 

@@ -13,6 +13,10 @@
  * framework-owned nodes all survive untouched.
  */
 
+import { collapseSpaces, escapeText, indexTags, parseMarkup, stripMarkup, type ParsedNode, type ParsedTag } from './markup-text'
+
+export { collapseSpaces, escapeText, keepsFormattingMarkers, parseMarkup, stripMarkup, unescapeText, type ParsedNode } from './markup-text'
+
 export type ElementKind = 'ignore' | 'frozen' | 'opaque' | 'inline' | 'block'
 export type Classify = (el: Element) => ElementKind
 export type ReadText = (node: Text) => string
@@ -33,33 +37,8 @@ export interface Serialized {
   readonly tags: ReadonlyMap<number, TagNode>
 }
 
-export type ParsedNode =
-  | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'tag'; readonly id: number; readonly frozen: boolean; readonly children: ParsedNode[] }
-
-type ParsedTag = Extract<ParsedNode, { kind: 'tag' }>
-
 const MAX_FROZEN_TEXT = 120
-const TAG_RE = /<\s*(\/?)\s*([gc])\s*(\d+)\s*(\/?)\s*>/gi
 const SAFE_FROZEN_CLONE = new Set(['code', 'kbd', 'samp', 'var', 'br', 'wbr'])
-
-export function collapseSpaces(text: string): string {
-  return text.replace(/\s+/g, ' ')
-}
-
-export function escapeText(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-export function unescapeText(text: string): string {
-  return text
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-}
 
 export function isTagNode(item: Text | TagNode): item is TagNode {
   return 'children' in item && 'id' in item
@@ -128,57 +107,6 @@ function serializeList(nodes: Iterable<Node>, ctx: SerializeContext): { items: A
     markup += `<g${id}>${inner.markup}</g${id}>`
   }
   return { items, markup }
-}
-
-// ───────────────────────────── parse ─────────────────────────────
-
-/** Lenient parser: unknown closers are ignored, unclosed markers close at the end. */
-export function parseMarkup(markup: string): ParsedNode[] {
-  const root: ParsedNode[] = []
-  const stack: ParsedTag[] = []
-  const current = () => (stack.length ? stack[stack.length - 1].children : root)
-  const pushText = (raw: string) => {
-    if (raw) current().push({ kind: 'text', text: unescapeText(raw) })
-  }
-  let last = 0
-  for (const match of markup.matchAll(TAG_RE)) {
-    const index = match.index ?? 0
-    pushText(markup.slice(last, index))
-    last = index + match[0].length
-    const [, closing, kind, num, selfClosing] = match
-    const id = Number(num)
-    if (closing) {
-      const open = stack.map((tag) => tag.id).lastIndexOf(id)
-      if (open >= 0) stack.length = open
-      continue
-    }
-    const tag: ParsedTag = { kind: 'tag', id, frozen: kind.toLowerCase() === 'c', children: [] }
-    current().push(tag)
-    if (!selfClosing) stack.push(tag)
-  }
-  pushText(markup.slice(last))
-  return root
-}
-
-export function stripMarkup(markup: string): string {
-  const flatten = (nodes: ParsedNode[]): string =>
-    nodes.map((node) => (node.kind === 'text' ? node.text : flatten(node.children))).join('')
-  return flatten(parseMarkup(markup))
-}
-
-/** True when every formatting marker (`<gN>`) of `source` survived in `translated`. */
-export function keepsFormattingMarkers(source: string, translated: string): boolean {
-  const kept = indexTags(parseMarkup(translated), new Map())
-  return [...indexTags(parseMarkup(source), new Map()).values()].every((tag) => tag.frozen || kept.has(tag.id))
-}
-
-function indexTags(nodes: ParsedNode[], out: Map<number, ParsedTag>): Map<number, ParsedTag> {
-  for (const node of nodes) {
-    if (node.kind !== 'tag') continue
-    if (!out.has(node.id)) out.set(node.id, node)
-    indexTags(node.children, out)
-  }
-  return out
 }
 
 // ───────────────────────────── overlay plan ─────────────────────────────

@@ -1,20 +1,26 @@
 import { ApiError, toApiError } from '../core/errors'
 import { LruCache } from '../core/lru'
-import { stripMarkup } from '../core/markup'
 import { ConcurrencyPool } from '../core/pool'
-import { buildBatchMessages, buildTextMessages } from '../core/prompt'
-import { createObjectStreamParser } from '../core/stream-json'
+import { PROMPT_VERSION } from '../core/prompt'
+import { isSuspectTranslation } from '../core/reply'
 import { isLikelyInLanguage } from '../core/text-filter'
-import { getLanguage, type Language } from '../shared/languages'
+import { defaultTargetLang, getLanguage, type Language } from '../shared/languages'
 import type { ErrorCode } from '../shared/messages'
 import { MAX_CONCURRENCY, type Settings } from '../shared/settings'
 import { cloudApiConfig, usableModel } from './account'
-import { onRateLimited, streamChat, type ApiConfig } from './api'
+import { onRateLimited, streamTranslate, type ApiConfig } from './api'
+import { PersistentCache } from './persistent-cache'
+
+export { looksTruncated, plainReply } from '../core/reply'
 
 const CACHE_SIZE = 3000
+/** The backend refuses longer page titles. */
+const MAX_TITLE_CHARS = 200
 
 const pool = new ConcurrencyPool(MAX_CONCURRENCY)
+/** Memory first, then IndexedDB, then the network. */
 const cache = new LruCache<string, string>(CACHE_SIZE)
+const stored = new PersistentCache()
 
 /**
  * Concurrency adapts to rate limits: every 429 halves it, every successful request raises it by
@@ -31,58 +37,28 @@ async function chatConfig(settings: Settings): Promise<ApiConfig> {
   return cloudApiConfig(await usableModel(settings.model))
 }
 
-/** Keyed by the model actually called, which differs from the choice while it is locked. */
-function cacheKey(model: string, targetLang: string, text: string): string {
-  return `${model}\u0001${targetLang}\u0001${text}`
-}
-
 /**
- * A reply to a single-item request that is plain text instead of JSON (small models do that):
- * the text itself is the translation. Null when it looks like JSON the parser could not read.
+ * Keyed by the model actually called (it differs from the choice while that is locked) and the
+ * prompt version, so translations made under an older prompt are not shown after an update.
  */
-export function plainReply(reply: string): string | null {
-  const text = reply
-    .replace(/<think>[\s\S]*?<\/think>/g, '')
-    .replace(/^\s*```[a-z]*\s*|\s*```\s*$/gi, '')
-    .trim()
-  return text && !/^[{[]/.test(text) ? text : null
+function cacheKey(model: string, targetLang: string, text: string): string {
+  return `${PROMPT_VERSION}\u0001${model}\u0001${targetLang}\u0001${text}`
 }
 
 /** Translates `group` (markup strings) and reports each finished item by its index in `group`. */
 type GroupTranslator = (group: string[], deliver: (local: number, text: string) => void, signal: AbortSignal) => Promise<void>
 
 function groupTranslator(cfg: ApiConfig, targetLang: string, context: string): GroupTranslator {
-  const language = getLanguage(targetLang).prompt
+  const title = context.slice(0, MAX_TITLE_CHARS)
   return async (group, deliver, signal) => {
-    const parser = createObjectStreamParser()
-    let reply = ''
-    let isParsed = false
-    const take = (pairs: Array<[string, string]>) =>
-      pairs.forEach(([key, value]) => {
-        isParsed = true
-        deliver(Number(key), value)
-      })
-    for await (const delta of streamChat(cfg, buildBatchMessages(group, language, context), { signal })) {
-      reply += delta
-      take(parser.push(delta))
+    for await (const event of streamTranslate(cfg, { target: targetLang, title, kind: 'page', texts: group }, signal)) {
+      if ('index' in event) deliver(event.index, event.text)
     }
-    take(parser.end())
-    const plain = !isParsed && group.length === 1 ? plainReply(reply) : null
-    if (plain) deliver(0, plain)
   }
 }
 
 /** Errors a second attempt cannot fix. */
-const FINAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['quota', 'upgrade', 'model-locked', 'auth', 'bad-request', 'aborted', 'extension'])
-
-const SUSPECT_MIN_SOURCE = 40
-const SUSPECT_RATIO = 0.1
-
-/** A translation far shorter than its source was most likely cut off (e.g. at a stray quote). */
-export function looksTruncated(source: string, translation: string): boolean {
-  const src = stripMarkup(source).trim().length
-  return src >= SUSPECT_MIN_SOURCE && stripMarkup(translation).trim().length < src * SUSPECT_RATIO
-}
+const FINAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['quota', 'install-limit', 'upgrade', 'model-locked', 'auth', 'bad-request', 'aborted', 'extension'])
 
 export interface BatchOutcome {
   readonly failed: number[]
@@ -91,9 +67,10 @@ export interface BatchOutcome {
 
 /**
  * Translates `texts` (markup strings) and calls `onItem` as each one completes.
- * Cache hits are delivered first; misses go out as one request. Every item that is still
- * missing afterwards (skipped by the model, unreadable reply, or a failed request) gets one
- * more try on its own, unless the error is one a retry cannot fix.
+ * Cache hits (memory, then IndexedDB) are delivered first; misses go out as one request. Items
+ * still missing afterwards get one more try, unless the error is one a retry cannot fix: when the
+ * whole request failed they go out again together, and when the model only skipped a few (or
+ * sent ones that look cut off or lost their formatting markers) each goes out on its own.
  */
 export async function translateBatch(
   settings: Settings,
@@ -107,19 +84,32 @@ export async function translateBatch(
   const keyOf = (text: string) => cacheKey(cfg.model, settings.targetLang, text)
   const results: Array<string | undefined> = texts.map((text) => cache.get(keyOf(text)))
   results.forEach((text, i) => text !== undefined && onItem(i, text))
-  /** First-pass translations that looked truncated: used only if the retry brings nothing. */
-  const suspects = new Map<number, string>()
+  const missing = () => results.flatMap((text, i) => (text === undefined ? [i] : []))
 
-  const accept = (index: number, text: string) => {
+  const notInMemory = missing()
+  const fromDisk = await stored.getMany(notInMemory.map((i) => keyOf(texts[i])))
+  fromDisk.forEach((text, n) => {
+    if (text === undefined) return
+    const index = notInMemory[n]
     results[index] = text
     cache.set(keyOf(texts[index]), text)
+    onItem(index, text)
+  })
+
+  /** First-pass translations that looked broken: used only if the retry brings nothing. */
+  const suspects = new Map<number, string>()
+
+  const accept = (index: number, text: string, isTrusted = true) => {
+    results[index] = text
+    cache.set(keyOf(texts[index]), text)
+    if (isTrusted) stored.put(keyOf(texts[index]), text)
     onItem(index, text)
   }
 
   const requestGroup = async (indices: number[], isRetry: boolean) => {
     const deliver = (index: number, text: string) => {
       if (results[index] !== undefined || !text.trim()) return
-      if (!isRetry && looksTruncated(texts[index], text)) suspects.set(index, text)
+      if (!isRetry && isSuspectTranslation(texts[index], text)) suspects.set(index, text)
       else accept(index, text)
     }
     await pool.run(
@@ -134,33 +124,41 @@ export async function translateBatch(
     recoverConcurrency()
   }
 
-  const missing = () => results.flatMap((text, i) => (text === undefined ? [i] : []))
   let error: ApiError | undefined
+  let requestFailed = false
   try {
     if (missing().length) await requestGroup(missing(), false)
   } catch (err) {
+    requestFailed = true
     error = toApiError(err)
     if (FINAL_ERRORS.has(error.code) || signal.aborted) return { failed: missing(), error }
   }
 
   const retry = missing()
   if (retry.length) {
-    const outcomes = await Promise.allSettled(retry.map((i) => requestGroup([i], true)))
+    // One retry for a failed request; splitting it would multiply the load on a struggling backend.
+    const groups = requestFailed ? [retry] : retry.map((i) => [i])
+    const outcomes = await Promise.allSettled(groups.map((group) => requestGroup(group, true)))
     const rejected = outcomes.find((o): o is PromiseRejectedResult => o.status === 'rejected')
     if (rejected) error = toApiError(rejected.reason)
   }
-  suspects.forEach((text, i) => results[i] === undefined && accept(i, text))
+  suspects.forEach((text, i) => results[i] === undefined && accept(i, text, false))
 
   const failed = missing()
   if (!failed.length) return { failed }
   return { failed, error: error ?? new ApiError('bad-response', 'missedItems') }
 }
 
-/** Selection popover: if the text is already in the target language, translate the other way. */
-export function pickSelectionLanguage(settings: Settings, text: string): Language {
+/**
+ * Selection popover: the target language, unless the text is already in it; then the other way
+ * (into English, or from English into the browser's Chinese). `isReversed` (the card's switch
+ * button) picks the other of the two.
+ */
+export function pickSelectionLanguage(settings: Settings, text: string, isReversed = false): Language {
   const target = getLanguage(settings.targetLang)
-  if (!isLikelyInLanguage(text, target.code)) return target
-  return getLanguage(target.code.startsWith('en') ? 'zh-CN' : 'en')
+  const other = getLanguage(target.code.startsWith('en') ? defaultTargetLang() : 'en')
+  const isInTarget = isLikelyInLanguage(text, target.code)
+  return isInTarget !== isReversed ? other : target
 }
 
 export async function streamTextTranslation(
@@ -172,7 +170,9 @@ export async function streamTextTranslation(
 ): Promise<void> {
   const cfg = await chatConfig(settings)
   const job = async () => {
-    for await (const delta of streamChat(cfg, buildTextMessages(text, language.prompt), { signal })) onDelta(delta)
+    for await (const event of streamTranslate(cfg, { target: language.code, kind: 'selection', texts: [text] }, signal)) {
+      if ('delta' in event) onDelta(event.delta)
+    }
   }
   await pool.run(job, { signal, priority: 'high' })
 }

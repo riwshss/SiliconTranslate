@@ -5,7 +5,8 @@ import { compactNumber, translator, type MessageKey, type UiLang } from './i18n'
 import type { ReleaseChannel } from './service'
 import { CLOUD_MODELS } from './settings'
 
-export type Plan = 'beta' | 'free' | 'pro'
+/** `dev`: the owner's own installs (backend secret DEV_INSTALL_IDS): every model, no quota. */
+export type Plan = 'beta' | 'free' | 'pro' | 'dev'
 /** Features that cost money to serve. */
 export type Feature = 'cloud-ai'
 
@@ -23,17 +24,21 @@ export interface Entitlement {
   readonly quota: Quota | null
 }
 
-const PLANS: readonly Plan[] = ['beta', 'free', 'pro']
+/** chrome.storage.local key of the last entitlement the backend reported. */
+export const ENTITLEMENT_KEY = 'entitlement'
+
+const PLANS: readonly Plan[] = ['beta', 'free', 'pro', 'dev']
 const FEATURES: readonly Feature[] = ['cloud-ai']
 const MODEL_IDS = CLOUD_MODELS.map((m) => m.id)
 
 /** Mirrors server/src/app.ts PLAN_MODELS; used until the backend says otherwise. */
-const PLAN_MODELS: Record<Plan, readonly string[]> = { beta: [MODEL_IDS[0]], free: [], pro: MODEL_IDS }
+const PLAN_MODELS: Record<Plan, readonly string[]> = { beta: [MODEL_IDS[0]], free: [], pro: MODEL_IDS, dev: MODEL_IDS }
 
 export const PLAN_LABELS: Record<Plan, MessageKey> = {
   beta: 'planBeta',
   free: 'planFree',
   pro: 'planPro',
+  dev: 'planDev',
 }
 
 /** Used until the backend has answered: beta builds unlock everything, stable builds start free. */

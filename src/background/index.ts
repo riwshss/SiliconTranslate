@@ -1,3 +1,4 @@
+import { MAX_BATCH_ITEMS } from '../core/batching'
 import { toApiError } from '../core/errors'
 import { resolveUiLang, translator, type UiLang } from '../shared/i18n'
 import {
@@ -13,11 +14,11 @@ import {
 import { CLOUD_API_URL } from '../shared/service'
 import { dropLegacySettings, loadSettings } from '../shared/settings'
 import { contentScriptMatches } from '../shared/site-access'
-import { refreshEntitlement } from './account'
+import { forgetInstallToken, refreshEntitlement } from './account'
 import { pickSelectionLanguage, streamTextTranslation, translateBatch } from './translator'
 
-const MAX_BATCH_ITEMS = 50
-const MAX_ITEM_CHARS = 8000
+/** Same ceilings as the backend's /v1/translate (and MAX_MARKUP_CHARS in content/unit.ts). */
+const MAX_ITEM_CHARS = 6000
 const MAX_SELECTION_CHARS = 5000
 
 const CONTENT_SCRIPT_ID = 'silk-content'
@@ -54,9 +55,13 @@ async function uiLang(): Promise<UiLang> {
   return resolveUiLang(settings?.uiLang ?? 'auto')
 }
 
-/** The backend refused a model the cached plan allowed: the plan changed, so fetch it again. */
+/**
+ * Reacts to backend refusals: a model the cached plan allowed was refused (the plan changed, so
+ * fetch it again), or the install token was refused (get a new one with the next request).
+ */
 function refreshPlanAfter(code: string | undefined): void {
   if (code === 'model-locked') refreshEntitlement().catch((err) => console.error('[silk] failed to refresh plan', err))
+  if (code === 'auth') forgetInstallToken().catch((err) => console.error('[silk] failed to reset install token', err))
 }
 
 function safePost(port: chrome.runtime.Port, message: BatchEvent | StreamEvent): void {
@@ -129,8 +134,8 @@ function handleStreamPort(port: chrome.runtime.Port): void {
     const lang = await uiLang()
     try {
       const settings = await loadSettings()
-      const language = pickSelectionLanguage(settings, message.text)
-      safePost(port, { type: 'meta', targetLabel: language.label, speech: language.speech })
+      const language = pickSelectionLanguage(settings, message.text, message.isReversed === true)
+      safePost(port, { type: 'meta', targetLabel: language.label, speech: language.speech, lang: language.code })
       await streamTextTranslation(settings, message.text, language, (text) => safePost(port, { type: 'delta', text }), signal)
       safePost(port, { type: 'end' })
     } catch (err) {
@@ -154,6 +159,7 @@ async function account(): Promise<AccountResult> {
     return { ok: true, latencyMs: Math.round(performance.now() - started), entitlement }
   } catch (err) {
     const error = toApiError(err)
+    refreshPlanAfter(error.code)
     const lang = await uiLang()
     return { ok: false, message: error.code === 'aborted' ? translator(lang)('timeout') : error.text(lang) }
   }

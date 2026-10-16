@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "丝译 Silk Translate",
-  "short_name": "丝译",
-  "version": "2.2.1",
-  "description": "无痕网页翻译 · Seamless web page translation. Silk AI 云端翻译，可选 Claude Haiku 5.5 / GPT-6 Sol / Gemini 3.8 Flash；双语对照，划词翻译。",
+  "name": "__MSG_appName__",
+  "short_name": "__MSG_appShortName__",
+  "version": "2.3.0",
+  "default_locale": "en",
+  "description": "__MSG_appDescription__",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
@@ -21,7 +22,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "丝译 Silk Translate",
+    "default_title": "__MSG_appName__",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
