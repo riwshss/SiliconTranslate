@@ -42,6 +42,8 @@ const context = await chromium.launchPersistentContext(profile, {
   // A Chromium other than the one this Playwright version expects (e.g. preinstalled on CI).
   executablePath: process.env.SILK_E2E_CHROMIUM || undefined,
   headless: true,
+  // The checks expect an English browser (default target zh-CN); otherwise Chromium takes the machine locale.
+  locale: 'en-US',
   viewport: { width: 1100, height: 760 },
   args: [`--disable-extensions-except=${DIST}`, `--load-extension=${DIST}`],
 })
@@ -269,8 +271,10 @@ try {
     assert((await popup.$eval('#test-result', (el) => el.textContent)).includes('100K'), 'quota in English')
     assert((await popup.$eval('html', (el) => el.lang)) === 'en', 'html lang')
     // The popup runs in a tab of its own here; without the `tabs` permission Chrome hides that tab's
-    // URL (tab.url is undefined), so the popup shows its placeholder instead of the page kind.
-    assert((await popup.$eval('#host', (el) => el.textContent)) === '—', 'host label')
+    // URL (tab.url is undefined), so the popup shows its placeholder instead of the page kind. Newer
+    // Chromium shows an extension its own pages' URLs, so the page kind is right there too.
+    const hostLabel = await popup.$eval('#host', (el) => el.textContent)
+    assert(['—', 'chrome-extension page'].includes(hostLabel), `host label: ${hostLabel}`)
   })
   await popup.screenshot({ path: join(OUT, '6-popup-english.png'), fullPage: true })
   await check('页面 HUD 随之切换为英文', async () => {
