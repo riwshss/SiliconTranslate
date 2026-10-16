@@ -1,3 +1,4 @@
+import type { Entitlement } from './entitlement'
 import type { DisplayMode, Provider } from './settings'
 
 export const PORT_BATCH = 'silk:batch'
@@ -7,6 +8,8 @@ export const PORT_AI = 'silk:ai'
 
 export type ErrorCode =
   | 'no-key'
+  | 'quota'
+  | 'upgrade'
   | 'unavailable'
   | 'model-download'
   | 'auth'
@@ -67,6 +70,15 @@ export interface TestConnectionRequest {
 
 export type TestConnectionResult =
   | { readonly ok: true; readonly latencyMs: number; readonly models: string[] }
+  | { readonly ok: false; readonly message: string }
+
+/** popup → background: entitlement and today's quota for the Silk AI engine, fetched live. */
+export interface AccountRequest {
+  readonly type: 'silk:account'
+}
+
+export type AccountResult =
+  | { readonly ok: true; readonly latencyMs: number; readonly entitlement: Entitlement }
   | { readonly ok: false; readonly message: string }
 
 /** popup → content via tabs.sendMessage */

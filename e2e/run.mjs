@@ -1,17 +1,27 @@
 // End-to-end check in a real Chromium with the unpacked extension loaded.
-// Usage: npm run build && npm run e2e   (screenshots → e2e/output/)
+// Usage: npm run e2e   (builds an E2E variant whose Silk backend is the mock server; screenshots → e2e/output/)
+//        EXT_DIR=release/silk-translate-vX npm run e2e   (packaged build: the cloud-engine section is skipped)
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= 'D:\\DevCache\\ms-playwright'
 const { chromium } = await import('playwright')
-const { startMockServer, stats } = await import('./mock-server.mjs')
+const { startMockServer, stats, cloud } = await import('./mock-server.mjs')
 
-// EXT_DIR lets the release check run the suite against the packaged build.
-const DIST = resolve(process.env.EXT_DIR ?? 'dist')
+const MOCK_PORT = 18787
+const MOCK_ORIGIN = `http://127.0.0.1:${MOCK_PORT}`
 const OUT = resolve('e2e/output')
 mkdirSync(OUT, { recursive: true })
+
+// EXT_DIR lets the release check run the suite against the packaged build; otherwise build a
+// variant whose cloud engine talks to the mock server.
+const isCloudMocked = !process.env.EXT_DIR
+const DIST = resolve(process.env.EXT_DIR ?? join(OUT, 'ext'))
+if (isCloudMocked) {
+  execFileSync(process.execPath, ['build.mjs'], { stdio: 'inherit', env: { ...process.env, SILK_API_URL: MOCK_ORIGIN, SILK_OUTDIR: DIST } })
+}
 
 const results = []
 async function check(name, fn) {
@@ -28,8 +38,8 @@ function assert(cond, message) {
   if (!cond) throw new Error(message)
 }
 
-const server = await startMockServer()
-const origin = `http://127.0.0.1:${server.address().port}`
+const server = await startMockServer(MOCK_PORT)
+const origin = MOCK_ORIGIN
 const profile = mkdtempSync(join(tmpdir(), 'silk-e2e-'))
 const context = await chromium.launchPersistentContext(profile, {
   channel: 'chromium',
@@ -42,7 +52,7 @@ try {
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
   const extensionId = new URL(worker.url()).host
   await worker.evaluate(
-    (baseUrl) => chrome.storage.local.set({ settings: { apiKey: 'sk-test', baseUrl, model: 'mock/model-a' } }),
+    (baseUrl) => chrome.storage.local.set({ settings: { provider: 'openai', apiKey: 'sk-test', baseUrl, model: 'mock/model-a' } }),
     `${origin}/v1`,
   )
 
@@ -181,6 +191,54 @@ try {
   await popup.screenshot({ path: join(OUT, '4-popup-light.png'), fullPage: true })
   await popup.emulateMedia({ colorScheme: 'dark' })
   await popup.screenshot({ path: join(OUT, '5-popup-dark.png'), fullPage: true })
+  await popup.emulateMedia({ colorScheme: 'light' })
+
+  if (isCloudMocked) {
+    console.log('\nSilk AI 云端引擎（mock 后端）')
+    await popup.selectOption('#provider', 'cloud')
+    await check('Popup 显示测试版与今日额度', async () => {
+      await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('今日已用'))
+      const result = await popup.$eval('#test-result', (el) => el.textContent)
+      assert(result.includes('测试版') && result.includes('1234'), result)
+      assert((await popup.$eval('#conn', (el) => el.textContent)) === '可用', 'conn pill')
+      assert(!(await popup.$eval('#beta-badge', (el) => el.hidden)), 'beta badge hidden')
+    })
+    await popup.screenshot({ path: join(OUT, '6-popup-cloud.png'), fullPage: true })
+
+    const selectAndTranslate = async (selector) => {
+      await page.bringToFront()
+      await page.mouse.click(5, 5)
+      await page.click(selector, { clickCount: 3 })
+      await page.waitForSelector('silk-ui .trigger:not([hidden])')
+      await page.click('silk-ui .trigger')
+    }
+    const cardText = () => page.$eval('silk-ui', (el) => el.shadowRoot.querySelector('.result')?.textContent ?? '')
+    await check('划词翻译走 Silk 后端：匿名安装 ID、不带 API Key', async () => {
+      await selectAndTranslate('#title')
+      await page.waitForFunction(
+        () => document.querySelector('silk-ui').shadowRoot.querySelector('.result').textContent.includes('划词译文：Building'),
+        null,
+        { timeout: 10000 },
+      )
+      assert(cloud.requests >= 1, `cloud requests ${cloud.requests}`)
+      assert(cloud.installIds.size === 1, `install ids ${cloud.installIds.size}`)
+      assert(cloud.withAuthorization === 0, 'Authorization header leaked to the Silk backend')
+    })
+    await check('额度用完：显示友好提示且不重试', async () => {
+      cloud.isQuotaExhausted = true
+      const before = cloud.requests
+      await selectAndTranslate('#p1')
+      await page.waitForFunction(
+        () => document.querySelector('silk-ui').shadowRoot.querySelector('.result')?.textContent.includes('额度'),
+        null,
+        { timeout: 10000 },
+      )
+      await page.waitForTimeout(1500)
+      assert(cloud.requests - before === 1, `requests after quota error: ${cloud.requests - before}`)
+      assert((await cardText()).includes('免费额度已用完'), await cardText())
+    })
+    await page.screenshot({ path: join(OUT, '7-quota.png') })
+  }
 } finally {
   await context.close()
   server.close()

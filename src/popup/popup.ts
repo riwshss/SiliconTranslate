@@ -12,8 +12,10 @@ import {
   translatorAvailability,
   type Availability,
 } from '../shared/chrome-ai'
+import { describeQuota, PLAN_LABELS } from '../shared/entitlement'
 import { chromeAiLanguage, getLanguage, LANGUAGES, normalizeDetected } from '../shared/languages'
-import type { PageState, TabMessage, TestConnectionRequest, TestConnectionResult } from '../shared/messages'
+import type { AccountRequest, AccountResult, PageState, TabMessage, TestConnectionRequest, TestConnectionResult } from '../shared/messages'
+import { RELEASE_CHANNEL } from '../shared/service'
 import {
   GOOGLE_TRANSLATE_URL,
   hostPermissionFor,
@@ -240,7 +242,14 @@ async function ensureHostPermission(endpoint: string): Promise<boolean> {
   }
 }
 
+const README_URL = 'https://github.com/riwshss/SiliconTranslate#readme'
+
 const PROVIDER_UI: Record<Provider, { help: [string, string]; test: string; note?: string }> = {
+  cloud: {
+    help: ['使用说明 ↗', README_URL],
+    test: '查看额度',
+    note: 'Silk AI 通过 OpenRouter 聚合平台调用大模型，开箱即用，无需 API Key。测试期间所有功能免费，每天有免费额度。翻译时网页文本会发送到 Silk 翻译服务处理，不会被保存。',
+  },
   openai: { help: ['获取 API Key ↗', 'https://cloud.siliconflow.cn/account/ak'], test: '测试连接' },
   google: { help: ['获取 Google API Key ↗', 'https://console.cloud.google.com/apis/credentials'], test: '测试连接' },
   'chrome-translator': {
@@ -304,6 +313,7 @@ function applyProvider(): void {
   link.href = ui.help[1]
   setTestResult('')
   if (isChromeAiProvider(provider)) void renderChromeStatus()
+  else if (provider === 'cloud') void checkAccount()
   else renderKeyConn()
 }
 
@@ -366,6 +376,28 @@ async function testChromeModels(): Promise<void> {
   }
 }
 
+/** Silk AI: plan and today's quota, straight from the backend. */
+async function checkAccount(): Promise<void> {
+  setConn('idle', '检查中')
+  const result = (await chrome.runtime.sendMessage({ type: 'silk:account' } satisfies AccountRequest).catch((err: unknown) => {
+    console.error('[silk] account check failed', err)
+    return { ok: false, message: '无法连接扩展后台，请重新打开面板' }
+  })) as AccountResult
+  if (settings.provider !== 'cloud') return
+  if (!result.ok) {
+    setTestResult(result.message, 'error')
+    setConn('error', '连接失败')
+    return
+  }
+  const { plan, features, quota } = result.entitlement
+  const isEnabled = features.includes('cloud-ai')
+  const isExhausted = !!quota && quota.used >= quota.limit
+  setTestResult([PLAN_LABELS[plan], quota ? describeQuota(quota) : ''].filter(Boolean).join(' · '), isEnabled && !isExhausted ? 'ok' : 'error')
+  if (!isEnabled) setConn('warn', '需升级')
+  else if (isExhausted) setConn('warn', '额度用完')
+  else setConn('ok', '可用')
+}
+
 async function testRemote(provider: 'openai' | 'google'): Promise<void> {
   const isGoogle = provider === 'google'
   const baseUrl = $<HTMLInputElement>('base-url').value
@@ -399,6 +431,7 @@ async function testConnection(): Promise<void> {
   button.classList.add('is-loading')
   try {
     if (isChromeAiProvider(provider)) await testChromeModels()
+    else if (provider === 'cloud') await checkAccount()
     else await testRemote(provider)
   } catch (err) {
     setTestResult(err instanceof Error ? err.message : '测试失败', 'error')
@@ -461,6 +494,7 @@ function initApiSection(): void {
 
 async function init(): Promise<void> {
   settings = await loadSettings()
+  $('beta-badge').hidden = RELEASE_CHANNEL !== 'beta'
 
   const lang = $<HTMLSelectElement>('lang')
   lang.replaceChildren(...LANGUAGES.map((l) => new Option(l.label, l.code)))

@@ -2,6 +2,8 @@ import { toApiError } from '../core/errors'
 import {
   PORT_BATCH,
   PORT_STREAM,
+  type AccountRequest,
+  type AccountResult,
   type BatchEvent,
   type BatchRequest,
   type StreamEvent,
@@ -10,6 +12,7 @@ import {
   type TestConnectionResult,
 } from '../shared/messages'
 import { isChromeAiProvider, loadSettings, onSettingsChanged, sanitizeSettings } from '../shared/settings'
+import { refreshEntitlement } from './account'
 import { listChatModels, pingModel } from './api'
 import { googleTranslate } from './google'
 import { pickSelectionLanguage, setConcurrency, streamTextTranslation, translateBatch } from './translator'
@@ -108,6 +111,8 @@ chrome.runtime.onConnect.addListener((port) => {
   else if (port.name === PORT_STREAM) handleStreamPort(port)
 })
 
+const TIMEOUT_MESSAGE = '连接超时（20 秒），请检查网络或代理'
+
 async function testConnection(req: TestConnectionRequest): Promise<TestConnectionResult> {
   // Validate with the same rules as stored settings (popup input is untrusted too).
   const settings = sanitizeSettings({ apiKey: req.apiKey, baseUrl: req.baseUrl, model: req.model, googleApiKey: req.apiKey })
@@ -123,14 +128,26 @@ async function testConnection(req: TestConnectionRequest): Promise<TestConnectio
     return { ok: true, latencyMs, models }
   } catch (err) {
     const error = toApiError(err)
-    return { ok: false, message: error.code === 'aborted' ? '连接超时（20 秒），请检查网络或代理' : error.message }
+    return { ok: false, message: error.code === 'aborted' ? TIMEOUT_MESSAGE : error.message }
+  }
+}
+
+async function account(): Promise<AccountResult> {
+  const started = performance.now()
+  try {
+    const entitlement = await refreshEntitlement(AbortSignal.timeout(20_000))
+    return { ok: true, latencyMs: Math.round(performance.now() - started), entitlement }
+  } catch (err) {
+    const error = toApiError(err)
+    return { ok: false, message: error.code === 'aborted' ? TIMEOUT_MESSAGE : error.message }
   }
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false
-  const req = message as TestConnectionRequest
-  if (req?.type !== 'silk:test-connection') return false
-  testConnection(req).then(sendResponse)
+  const req = message as TestConnectionRequest | AccountRequest
+  if (req?.type === 'silk:test-connection') testConnection(req).then(sendResponse)
+  else if (req?.type === 'silk:account') account().then(sendResponse)
+  else return false
   return true
 })

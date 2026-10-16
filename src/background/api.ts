@@ -3,9 +3,12 @@ import { createSseParser } from '../core/sse'
 import type { ChatMessage } from '../core/prompt'
 
 export interface ApiConfig {
+  /** Sent as a Bearer token when non-empty. */
   readonly apiKey: string
   readonly baseUrl: string
   readonly model: string
+  /** Extra request headers, e.g. the anonymous install id for the Silk backend. */
+  readonly headers?: Readonly<Record<string, string>>
 }
 
 interface ChatOptions {
@@ -64,7 +67,13 @@ export function onRateLimited(listener: () => void): void {
   rateLimitListener = listener
 }
 
+/** Header the Silk backend sets on its own errors, so they are classified without reading the body. */
+const SILK_ERROR_HEADER = 'x-silk-error'
+
 async function errorFromResponse(res: Response): Promise<ApiError> {
+  const silkError = res.headers.get(SILK_ERROR_HEADER)
+  if (silkError === 'quota_exceeded') return new ApiError('quota')
+  if (silkError === 'upgrade_required' || res.status === 402) return new ApiError('upgrade')
   const raw = await res.text().catch(() => '')
   let detail = raw.slice(0, 200)
   try {
@@ -93,6 +102,8 @@ export async function fetchWithRetry(url: string, init: RequestInit, signal?: Ab
       continue
     }
     if (res.ok) return res
+    // A spent quota or missing plan is a final answer, not a transient 429.
+    if (res.headers.has(SILK_ERROR_HEADER) || res.status === 402) throw await errorFromResponse(res)
     const isRateLimited = res.status === 429
     if (isRateLimited) rateLimitListener?.()
     const isRetryable = isRateLimited || res.status >= 500
@@ -103,7 +114,11 @@ export async function fetchWithRetry(url: string, init: RequestInit, signal?: Ab
 }
 
 function headers(cfg: ApiConfig): HeadersInit {
-  return { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' }
+  return {
+    ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
+    'Content-Type': 'application/json',
+    ...cfg.headers,
+  }
 }
 
 interface ChunkPayload {

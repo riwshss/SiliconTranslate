@@ -6,11 +6,12 @@ export type TranslateMode = Exclude<DisplayMode, 'original'>
 export type BilingualStyle = 'dashed' | 'highlight'
 export type DomainRule = 'always' | 'never'
 /**
- * Translation engine. `openai`: SiliconFlow or any OpenAI-compatible endpoint; `google`: Cloud
+ * Translation engine. `cloud`: Silk AI through the Silk backend (OpenRouter, no key needed);
+ * `openai`: any OpenAI-compatible endpoint on the user's own key; `google`: Cloud
  * Translation API (v2); `chrome-translator` / `chrome-nano`: Chrome's on-device Translator API and
  * Gemini Nano (Prompt API), run in the offscreen document.
  */
-export type Provider = 'openai' | 'google' | 'chrome-translator' | 'chrome-nano'
+export type Provider = 'cloud' | 'openai' | 'google' | 'chrome-translator' | 'chrome-nano'
 
 export interface Settings {
   readonly provider: Provider
@@ -39,7 +40,8 @@ export const MODEL_PRESETS: readonly { id: string; note: string }[] = [
 ]
 
 export const PROVIDERS: readonly { id: Provider; label: string }[] = [
-  { id: 'openai', label: '硅基流动 / OpenAI 兼容' },
+  { id: 'cloud', label: 'Silk AI 云端翻译（测试期免费）' },
+  { id: 'openai', label: '自定义 AI 接口（OpenAI 兼容 · 自带 Key）' },
   { id: 'google', label: 'Google 翻译 API' },
   { id: 'chrome-translator', label: 'Chrome 内置翻译（本地）' },
   { id: 'chrome-nano', label: 'Chrome 内置 Gemini Nano（本地 · 实验）' },
@@ -58,7 +60,7 @@ export function engineId(settings: Settings): string {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  provider: 'openai',
+  provider: 'cloud',
   apiKey: '',
   googleApiKey: '',
   baseUrl: DEFAULT_BASE_URL,
@@ -131,7 +133,7 @@ export function sanitizeSettings(raw: unknown): Settings {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const concurrency = Number(src.maxConcurrency)
   return {
-    provider: pickEnum(src.provider, PROVIDER_IDS, 'openai'),
+    provider: pickEnum(src.provider, PROVIDER_IDS, DEFAULT_SETTINGS.provider),
     apiKey: typeof src.apiKey === 'string' ? src.apiKey.trim().slice(0, 300) : '',
     googleApiKey: typeof src.googleApiKey === 'string' ? src.googleApiKey.trim().slice(0, 300) : '',
     baseUrl: sanitizeBaseUrl(src.baseUrl),

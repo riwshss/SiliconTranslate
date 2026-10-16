@@ -2,6 +2,8 @@ import type { ErrorCode, WireError } from '../shared/messages'
 
 const FRIENDLY: Record<ErrorCode, string> = {
   'no-key': '还没有填写 API Key，请点击扩展图标完成设置',
+  quota: '今日免费额度已用完，北京时间早上 8 点（UTC 0 点）恢复；也可以切换到其他翻译引擎',
+  upgrade: '当前套餐不包含 Silk AI 云端翻译，请升级或切换到其他翻译引擎',
   unavailable: '浏览器内置模型不可用',
   'model-download': '本地模型尚未下载，请点击扩展图标 →「检查 / 下载模型」',
   auth: 'API Key 无效或已过期',

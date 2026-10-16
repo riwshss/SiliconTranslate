@@ -1,15 +1,17 @@
-# 丝译 Silk Translate
+# 丝译 Silk Translate · Beta
 
-Chrome 网页翻译扩展（Manifest V3），支持多种翻译引擎：[硅基流动 SiliconFlow](https://siliconflow.cn) 或任意 OpenAI 兼容接口、Google 翻译 API，以及 Chrome 内置的本地模型（Translator API / Gemini Nano）。
-TypeScript + esbuild，无前端框架、无运行时依赖。
+面向大众的 Chrome 网页翻译扩展（Manifest V3）。默认使用 **Silk AI 云端翻译**：通过 [OpenRouter](https://openrouter.ai) 聚合平台调用大模型，装好即用，无需 API Key。**测试版期间所有功能免费**（每天有免费额度）。
+也支持自带 Key 的 OpenAI 兼容接口（如 [硅基流动](https://siliconflow.cn)）、Google 翻译 API，以及 Chrome 内置的本地模型（Translator API / Gemini Nano）。
+扩展：TypeScript + esbuild，无前端框架、无运行时依赖。后端：Cloudflare Worker（`server/`）。
 
 ## 功能
 
-- **四种翻译引擎**（面板「翻译服务」中切换，译文按引擎分开缓存）
+- **五种翻译引擎**（面板「翻译服务」中切换，译文按引擎分开缓存）
 
   | 引擎 | 说明 |
   |---|---|
-  | 硅基流动 / OpenAI 兼容 | 大模型翻译，可改接口地址接入任意 OpenAI 兼容服务 |
+  | Silk AI 云端翻译（默认） | 经 Silk 后端调用 OpenRouter 上的大模型，无需 Key；测试期免费，按日限额。以后作为付费功能 |
+  | 自定义 AI 接口（OpenAI 兼容） | 自带 Key，可接硅基流动、OpenRouter 或任意 OpenAI 兼容服务 |
   | Google 翻译 API | Cloud Translation（Basic v2），需要 Google Cloud API Key |
   | Chrome 内置翻译（本地） | Chrome 自带的 Translator API，内容不离开本机，无需 Key |
   | Chrome 内置 Gemini Nano（本地 · 实验） | Chrome 自带的 Prompt API 小模型，内容不离开本机 |
@@ -37,7 +39,8 @@ npm run build
 1. 打开 `chrome://extensions`，开启右上角「开发者模式」。
 2. 点击「加载已解压的扩展程序」，选择项目下的 `dist/` 目录。
 3. 点击工具栏中的丝译图标，在「翻译服务」中选择引擎：
-   - **硅基流动**：填入 API Key（在 [硅基流动控制台](https://cloud.siliconflow.cn/account/ak) 创建），点「测试连接」。
+   - **Silk AI 云端翻译**（默认）：无需设置，点「查看额度」可确认服务可用和今日剩余额度。需要先部署后端，见下文「Silk AI 后端」。
+   - **自定义 AI 接口**：填入 API Key（例如在 [硅基流动控制台](https://cloud.siliconflow.cn/account/ak) 创建），点「测试连接」。
    - **Google 翻译 API**：在 [Google Cloud 控制台](https://console.cloud.google.com/apis/credentials) 启用 Cloud Translation API 并创建 API Key，填入后点「测试连接」。
    - **Chrome 内置**：点「检查 / 下载模型」，等待模型下载完成。
 
@@ -50,9 +53,57 @@ npm run build
 | 目标语言 | 整页翻译与划词翻译的目标语言 |
 | 默认模式 | 点「翻译此页」或按快捷键时首先使用的模式 |
 | 双语样式 | 虚线下划线 / 高亮 |
-| 模型 | 预设 `Qwen/Qwen2.5-7B-Instruct`（免费、快），也可从「测试连接」拉取的列表中选择或手动输入。Qwen3 系列会自动关闭思考模式 |
-| 并发数 | 1–8，默认 4。免费额度遇到 429 时会自动按 `Retry-After` 退避重试 |
-| 接口地址 | 默认 `https://api.siliconflow.cn/v1`，可改为任意 OpenAI 兼容接口 |
+| 模型（自定义接口） | 预设 `Qwen/Qwen2.5-7B-Instruct`（免费、快），也可从「测试连接」拉取的列表中选择或手动输入。Qwen3 系列会自动关闭思考模式 |
+| 并发数 | 1–8，默认 4。遇到 429 限流时会自动按 `Retry-After` 退避重试；Silk AI 的「今日额度用完」不会重试 |
+| 接口地址（自定义接口） | 默认 `https://api.siliconflow.cn/v1`，可改为任意 OpenAI 兼容接口 |
+
+## Silk AI 后端（`server/`）
+
+Cloudflare Worker，作用是**把 OpenRouter 的 Key 留在服务器上**（写进扩展的 Key 一定会被人拆出来盗用），并给每个安装按日限额。
+
+- 扩展首次使用时生成一个随机 UUID（安装 ID），请求时放在 `X-Silk-Install` 头里；不含任何个人信息。
+- 每次请求按提示词字符数扣额度，UTC 0 点重置。三层限额都在 `server/wrangler.toml` 里调：
+  - 每个安装：`INSTALL_DAILY_CHARS`（默认 20 万字）
+  - 每个 IP：`IP_DAILY_CHARS`（防止反复重装刷额度）
+  - 全站：`GLOBAL_DAILY_CHARS`（钱包保护，超出后当天所有人暂停）
+- 模型由服务器决定（`OPENROUTER_MODEL`，默认 `google/gemini-2.5-flash-lite`，输入 $0.10 / 输出 $0.40 每百万 token），客户端传什么模型都会被忽略。
+- OpenRouter 出错时会退还本次扣的额度，客户端的自动重试不会白扣额度。
+- 接口：`GET /v1/entitlement`（套餐与今日额度）、`POST /v1/chat/completions`（OpenAI 兼容，流式）。JSON 响应统一为 `{ success, data, error, meta }`；额度用完返回 `429` 并带 `X-Silk-Error: quota_exceeded`。
+
+### 部署
+
+```bash
+cd server
+npm install
+npx wrangler login                          # 浏览器授权 Cloudflare 账号
+npx wrangler secret put OPENROUTER_API_KEY  # 粘贴 OpenRouter Key（https://openrouter.ai/keys）
+npx wrangler deploy                         # 输出 https://silk-translate-api.<你的子域>.workers.dev
+```
+
+然后用这个地址重新构建扩展：
+
+```bash
+SILK_API_URL=https://silk-translate-api.<你的子域>.workers.dev npm run package
+```
+
+建议在 OpenRouter 后台给这个 Key 设置**消费上限**，作为全站额度之外的第二道保险。本地调试：`server/.dev.vars` 写入 `OPENROUTER_API_KEY=…` 后运行 `npm run dev`（`http://127.0.0.1:8787`，也是扩展未指定地址时的默认后端）。
+
+### 构建参数
+
+| 环境变量 | 说明 |
+|---|---|
+| `SILK_API_URL` | Silk 后端地址，会自动加入 manifest 的 `host_permissions`。只接受 https（本机可用 http） |
+| `SILK_CHANNEL` | `beta`（默认：名称带 Beta，云端 AI 默认可用）或 `stable` |
+| `SILK_OUTDIR` | 输出目录，默认 `dist` |
+
+### 以后接入内购
+
+付费逻辑只需改后端，扩展基本不用动：
+
+- `src/shared/entitlement.ts` 定义套餐（`beta` / `free` / `pro`）和功能（目前只有 `cloud-ai`）。只有 Silk AI 这种要花钱的引擎受套餐限制；自带 Key 和本地模型永远免费。
+- 后端 `server/src/app.ts` 的 `CURRENT_PLAN` 现在固定为 `beta`。接入支付（如 Stripe、Paddle）后，改成按安装 ID 或账户查询付费状态，并给不同套餐不同额度。
+- 后端对没有权限的请求返回 `402`，扩展显示「当前套餐不包含 Silk AI 云端翻译」。扩展本地也会缓存套餐，提前拦下注定失败的请求，但真正的限制以后端为准。
+- 正式版用 `SILK_CHANNEL=stable` 构建：服务器回复前默认按免费版处理。
 
 ### Google 翻译 API
 
@@ -77,7 +128,8 @@ npm run build
 
 ## 隐私
 
-- API Key 与设置只保存在本机 `chrome.storage.local`，仅发送给对应的接口（硅基流动 / 你配置的地址 / Google）。
+- 使用 Silk AI 时，待翻译的网页文本会发送到 Silk 后端，再转给 OpenRouter 上的模型；后端不保存文本，只按匿名安装 ID 记录当天用了多少字。
+- API Key 与设置只保存在本机 `chrome.storage.local`，仅发送给对应的接口（你配置的地址 / Google）。
 - 选择 Chrome 内置引擎时，网页内容完全在本机处理，不发出任何翻译请求。
 - 网页内容只在翻译时发送给该接口；扩展不包含任何统计或第三方请求。
 - 所有扩展 UI 渲染在独立的 Shadow DOM 中，不影响页面样式。
@@ -89,11 +141,12 @@ npm run dev         # esbuild watch（改 manifest/html/css 后需重新运行�
 npm run typecheck   # tsc --noEmit
 npm test            # Vitest 单元测试（jsdom）
 npm run coverage    # 覆盖率报告
-npm run e2e         # Playwright 真浏览器端到端测试（需先 npm run build）
+npm run e2e         # Playwright 真浏览器端到端测试（自动构建一份连 mock 后端的版本）
 npm run icons       # 重新生成 static/icons 下的 PNG 图标
 ```
 
-E2E 使用本地 mock 服务器模拟 SSE 流式响应、429 限流和并发统计，不消耗真实 API 额度；截图输出到 `e2e/output/`。
+E2E 使用本地 mock 服务器模拟 SSE 流式响应、429 限流、并发统计，以及 Silk 后端（额度查询、匿名安装 ID、额度用完），不消耗真实 API 额度；截图输出到 `e2e/output/`。
+后端的单元测试在 `tests/server.test.ts`，和扩展一起由 `npm test` 运行。
 如 Playwright 浏览器装在非默认位置，请设置 `PLAYWRIGHT_BROWSERS_PATH`。
 
 ### 目录结构
@@ -108,7 +161,8 @@ src/
 ├── popup/        工具栏面板
 └── shared/       设置（含输入校验）、消息协议、语言表、快捷键、Chrome 内置 AI 封装
 static/           manifest.json 与图标
-tests/            单元测试
+server/           Silk 后端（Cloudflare Worker）：OpenRouter 代理、按日限额（Durable Object）、套餐
+tests/            单元测试（含后端）
 e2e/              端到端测试（fixture 页面 + mock API）
 ```
 
