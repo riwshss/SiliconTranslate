@@ -91,8 +91,6 @@ function assertManifest(version) {
     manifest.background.service_worker,
     manifest.action.default_popup,
     ...manifest.content_scripts.flatMap((c) => c.js),
-    'offscreen.html',
-    'offscreen.js',
   ]
   const missing = required.filter((file) => !statSync(join(DIST, file), { throwIfNoEntry: false }))
   if (missing.length) throw new Error(`dist/ is missing: ${missing.join(', ')}`)

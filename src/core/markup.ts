@@ -172,24 +172,6 @@ export function keepsFormattingMarkers(source: string, translated: string): bool
   return [...indexTags(parseMarkup(source), new Map()).values()].every((tag) => tag.frozen || kept.has(tag.id))
 }
 
-/** Google's HTML mode has no self-closing custom tags: `<c1/>` would swallow the rest of the text. */
-export function toGoogleHtml(markup: string): string {
-  return markup.replace(/<c(\d+)\/>/g, '<c$1></c$1>')
-}
-
-/**
- * Google answers in HTML: numeric entities (`&#39;`, `&#8217;`) are decoded here, while
- * `&amp;` / `&lt;` / `&gt;` stay escaped because the result is parsed as markup again.
- */
-export function fromGoogleHtml(html: string): string {
-  return html.replace(/&#(x[0-9a-f]+|\d+);/gi, (entity, num: string) => {
-    const code = num[0].toLowerCase() === 'x' ? parseInt(num.slice(1), 16) : Number(num)
-    if (!Number.isInteger(code) || code < 1 || code > 0x10ffff) return entity
-    const char = String.fromCodePoint(code)
-    return char === '&' || char === '<' || char === '>' ? escapeText(char) : char
-  })
-}
-
 function indexTags(nodes: ParsedNode[], out: Map<number, ParsedTag>): Map<number, ParsedTag> {
   for (const node of nodes) {
     if (node.kind !== 'tag') continue

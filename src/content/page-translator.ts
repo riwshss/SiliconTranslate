@@ -1,3 +1,4 @@
+import { resolveUiLang, translator } from '../shared/i18n'
 import type { PageState } from '../shared/messages'
 import { engineId, type DisplayMode, type Settings } from '../shared/settings'
 import { Batcher } from './batcher'
@@ -77,6 +78,7 @@ export class PageTranslator {
         onFail: (keys, _code, message) => this.handleFail(keys, message),
       },
       () => document.title,
+      () => translator(resolveUiLang(this.settings.uiLang)),
     )
   }
 

@@ -1,3 +1,4 @@
+import { UI_LANG_SETTINGS, type MessageKey, type UiLangSetting } from './i18n'
 import { isKnownLanguage } from './languages'
 import { isValidShortcut } from './shortcut'
 
@@ -5,20 +6,24 @@ export type DisplayMode = 'original' | 'overlay' | 'bilingual'
 export type TranslateMode = Exclude<DisplayMode, 'original'>
 export type BilingualStyle = 'dashed' | 'highlight'
 export type DomainRule = 'always' | 'never'
+
 /**
- * Translation engine. `cloud`: Silk AI through the Silk backend (OpenRouter, no key needed);
- * `openai`: any OpenAI-compatible endpoint on the user's own key; `google`: Cloud
- * Translation API (v2); `chrome-translator` / `chrome-nano`: Chrome's on-device Translator API and
- * Gemini Nano (Prompt API), run in the offscreen document.
+ * Models the Silk AI engine offers, as OpenRouter ids. The backend keeps the same list
+ * (server/src/app.ts MODELS) and decides which ones each plan may use; the beta only gets the
+ * first, cheapest one.
  */
-export type Provider = 'cloud' | 'openai' | 'google' | 'chrome-translator' | 'chrome-nano'
+export const CLOUD_MODELS: readonly { id: string; label: string; note: MessageKey }[] = [
+  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', note: 'modelCheapest' },
+  { id: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5', note: 'modelFast' },
+  { id: 'openai/gpt-6-sol', label: 'GPT-6 Sol', note: 'modelBest' },
+  { id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'modelBalanced' },
+]
+export const DEFAULT_MODEL = CLOUD_MODELS[0].id
+const MODEL_IDS = CLOUD_MODELS.map((m) => m.id)
 
 export interface Settings {
-  readonly provider: Provider
-  readonly apiKey: string
-  readonly googleApiKey: string
-  readonly baseUrl: string
   readonly model: string
+  readonly uiLang: UiLangSetting
   readonly targetLang: string
   readonly defaultMode: TranslateMode
   readonly bilingualStyle: BilingualStyle
@@ -28,43 +33,14 @@ export interface Settings {
   readonly domainRules: Readonly<Record<string, DomainRule>>
 }
 
-export const DEFAULT_BASE_URL = 'https://api.siliconflow.cn/v1'
-export const DEFAULT_MODEL = 'Qwen/Qwen2.5-7B-Instruct'
-
-export const MODEL_PRESETS: readonly { id: string; note: string }[] = [
-  { id: 'Qwen/Qwen2.5-7B-Instruct', note: '免费 · 快' },
-  { id: 'deepseek-ai/DeepSeek-V3', note: '质量高' },
-  { id: 'Qwen/Qwen2.5-72B-Instruct', note: '质量高' },
-  { id: 'Qwen/Qwen2.5-32B-Instruct', note: '均衡' },
-  { id: 'THUDM/glm-4-9b-chat', note: '免费' },
-]
-
-export const PROVIDERS: readonly { id: Provider; label: string }[] = [
-  { id: 'cloud', label: 'Silk AI 云端翻译（测试期免费）' },
-  { id: 'openai', label: '自定义 AI 接口（OpenAI 兼容 · 自带 Key）' },
-  { id: 'google', label: 'Google 翻译 API' },
-  { id: 'chrome-translator', label: 'Chrome 内置翻译（本地）' },
-  { id: 'chrome-nano', label: 'Chrome 内置 Gemini Nano（本地 · 实验）' },
-]
-const PROVIDER_IDS = PROVIDERS.map((p) => p.id)
-
-export const GOOGLE_TRANSLATE_URL = 'https://translation.googleapis.com/language/translate/v2'
-
-export function isChromeAiProvider(provider: Provider): provider is 'chrome-translator' | 'chrome-nano' {
-  return provider === 'chrome-translator' || provider === 'chrome-nano'
-}
-
-/** Identifies which engine produced a translation: part of every cache key. */
+/** Identifies which model produced a translation: part of every cache key. */
 export function engineId(settings: Settings): string {
-  return settings.provider === 'openai' ? `openai:${settings.model}` : settings.provider
+  return `cloud:${settings.model}`
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  provider: 'cloud',
-  apiKey: '',
-  googleApiKey: '',
-  baseUrl: DEFAULT_BASE_URL,
   model: DEFAULT_MODEL,
+  uiLang: 'auto',
   targetLang: 'zh-CN',
   defaultMode: 'overlay',
   bilingualStyle: 'dashed',
@@ -78,46 +54,8 @@ const STORAGE_KEY = 'settings'
 const HOST_RE = /^[a-z0-9.-]{1,253}$/
 const MAX_DOMAIN_RULES = 500
 
-function pickString(value: unknown, fallback: string, maxLength: number): string {
-  if (typeof value !== 'string') return fallback
-  const trimmed = value.trim()
-  return trimmed && trimmed.length <= maxLength ? trimmed : fallback
-}
-
 function pickEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback
-}
-
-const LOOPBACK_HOSTS = ['localhost', '127.0.0.1']
-
-/** https anywhere; plain http only on loopback, so the API key never crosses the network in cleartext. */
-function parseEndpoint(value: unknown): URL | null {
-  if (typeof value !== 'string') return null
-  try {
-    const url = new URL(value.trim())
-    const isAllowed = url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK_HOSTS.includes(url.hostname))
-    return isAllowed ? url : null
-  } catch {
-    return null
-  }
-}
-
-function sanitizeBaseUrl(value: unknown): string {
-  const url = parseEndpoint(value)
-  return url ? url.href.replace(/\/+$/, '') : DEFAULT_BASE_URL
-}
-
-/** Hosts granted in manifest `host_permissions`: the default API plus local OpenAI-compatible servers. */
-const GRANTED_HOSTS = [new URL(DEFAULT_BASE_URL).hostname, ...LOOPBACK_HOSTS]
-
-/**
- * Match pattern the extension must request (optional_host_permissions) to call `baseUrl`
- * without relying on CORS; null when the manifest already covers it or the endpoint is invalid.
- */
-export function hostPermissionFor(baseUrl: string): string | null {
-  const url = parseEndpoint(baseUrl)
-  if (!url || GRANTED_HOSTS.includes(url.hostname)) return null
-  return `${url.protocol}//${url.hostname}/*`
 }
 
 function sanitizeDomainRules(value: unknown): Record<string, DomainRule> {
@@ -128,16 +66,16 @@ function sanitizeDomainRules(value: unknown): Record<string, DomainRule> {
   return Object.fromEntries(entries) as Record<string, DomainRule>
 }
 
-/** Storage is external input: every field is validated and falls back to its default. */
+/**
+ * Storage is external input: every field is validated and falls back to its default. Fields of
+ * removed engines (provider, API keys, base URL) are dropped here.
+ */
 export function sanitizeSettings(raw: unknown): Settings {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const concurrency = Number(src.maxConcurrency)
   return {
-    provider: pickEnum(src.provider, PROVIDER_IDS, DEFAULT_SETTINGS.provider),
-    apiKey: typeof src.apiKey === 'string' ? src.apiKey.trim().slice(0, 300) : '',
-    googleApiKey: typeof src.googleApiKey === 'string' ? src.googleApiKey.trim().slice(0, 300) : '',
-    baseUrl: sanitizeBaseUrl(src.baseUrl),
-    model: pickString(src.model, DEFAULT_MODEL, 200),
+    model: pickEnum(src.model, MODEL_IDS, DEFAULT_MODEL),
+    uiLang: pickEnum(src.uiLang, UI_LANG_SETTINGS, DEFAULT_SETTINGS.uiLang),
     targetLang: isKnownLanguage(src.targetLang) ? src.targetLang : DEFAULT_SETTINGS.targetLang,
     defaultMode: pickEnum(src.defaultMode, ['overlay', 'bilingual'] as const, 'overlay'),
     bilingualStyle: pickEnum(src.bilingualStyle, ['dashed', 'highlight'] as const, 'dashed'),
@@ -163,6 +101,19 @@ export async function saveSettings(patch: Partial<Settings>): Promise<Settings> 
   const next = sanitizeSettings({ ...current, ...patch })
   await chrome.storage.local.set({ [STORAGE_KEY]: next })
   return next
+}
+
+/** Fields of the engines earlier versions offered (OpenAI-compatible, Google, Chrome on-device). */
+const LEGACY_KEYS = ['provider', 'apiKey', 'googleApiKey', 'baseUrl']
+
+/**
+ * Rewrites stored settings only when they still hold legacy fields, so API keys from earlier
+ * versions do not linger in storage. Writes nothing otherwise (no race with a fresh install).
+ */
+export async function dropLegacySettings(): Promise<void> {
+  const raw = (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY]
+  if (!raw || typeof raw !== 'object' || !LEGACY_KEYS.some((key) => key in raw)) return
+  await chrome.storage.local.set({ [STORAGE_KEY]: sanitizeSettings(raw) })
 }
 
 export function onSettingsChanged(listener: (next: Settings, prev: Settings) => void): () => void {

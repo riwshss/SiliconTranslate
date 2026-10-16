@@ -1,17 +1,15 @@
 import { ApiError, toApiError } from '../core/errors'
 import { LruCache } from '../core/lru'
-import { fromGoogleHtml, stripMarkup, toGoogleHtml } from '../core/markup'
+import { stripMarkup } from '../core/markup'
 import { ConcurrencyPool } from '../core/pool'
 import { buildBatchMessages, buildTextMessages } from '../core/prompt'
 import { createObjectStreamParser } from '../core/stream-json'
 import { isLikelyInLanguage } from '../core/text-filter'
 import { getLanguage, type Language } from '../shared/languages'
 import type { ErrorCode } from '../shared/messages'
-import { engineId, isChromeAiProvider, type Settings } from '../shared/settings'
-import { assertCanUse, cloudApiConfig } from './account'
+import type { Settings } from '../shared/settings'
+import { cloudApiConfig, usableModel } from './account'
 import { onRateLimited, streamChat, type ApiConfig } from './api'
-import { runChromeAi } from './chrome-ai'
-import { googleTranslate } from './google'
 
 const CACHE_SIZE = 3000
 
@@ -35,23 +33,14 @@ function recoverConcurrency(): void {
   if (pool.capacity < configuredConcurrency) pool.setLimit(pool.capacity + 1)
 }
 
-/** Chat-completions endpoint for the LLM engines: the Silk backend (`cloud`) or the user's own. */
+/** Chat-completions endpoint: the Silk backend, with the chosen model if the plan allows it. */
 async function chatConfig(settings: Settings): Promise<ApiConfig> {
-  if (settings.provider === 'cloud') {
-    await assertCanUse('cloud')
-    return cloudApiConfig()
-  }
-  if (!settings.apiKey) throw new ApiError('no-key')
-  return { apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model }
+  return cloudApiConfig(await usableModel(settings.model))
 }
 
-function googleKey(settings: Settings): string {
-  if (!settings.googleApiKey) throw new ApiError('no-key')
-  return settings.googleApiKey
-}
-
-function cacheKey(settings: Settings, text: string): string {
-  return `${engineId(settings)}\u0001${settings.targetLang}\u0001${text}`
+/** Keyed by the model actually called, which differs from the choice while it is locked. */
+function cacheKey(model: string, targetLang: string, text: string): string {
+  return `${model}\u0001${targetLang}\u0001${text}`
 }
 
 /**
@@ -69,21 +58,8 @@ export function plainReply(reply: string): string | null {
 /** Translates `group` (markup strings) and reports each finished item by its index in `group`. */
 type GroupTranslator = (group: string[], deliver: (local: number, text: string) => void, signal: AbortSignal) => Promise<void>
 
-async function groupTranslator(settings: Settings, context: string): Promise<GroupTranslator> {
-  const { provider } = settings
-  if (provider === 'google') {
-    const key = googleKey(settings)
-    return async (group, deliver, signal) => {
-      const out = await googleTranslate(key, group.map(toGoogleHtml), settings.targetLang, 'html', signal)
-      out.forEach((text, i) => deliver(i, fromGoogleHtml(text)))
-    }
-  }
-  if (isChromeAiProvider(provider)) {
-    return (group, deliver, signal) =>
-      runChromeAi({ kind: 'batch', provider, texts: group, targetLang: settings.targetLang }, (event) => event.type === 'item' && deliver(event.index, event.text), signal)
-  }
-  const cfg = await chatConfig(settings)
-  const language = getLanguage(settings.targetLang).prompt
+function groupTranslator(cfg: ApiConfig, targetLang: string, context: string): GroupTranslator {
+  const language = getLanguage(targetLang).prompt
   return async (group, deliver, signal) => {
     const parser = createObjectStreamParser()
     let reply = ''
@@ -104,7 +80,7 @@ async function groupTranslator(settings: Settings, context: string): Promise<Gro
 }
 
 /** Errors a second attempt cannot fix. */
-const FINAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['no-key', 'quota', 'upgrade', 'auth', 'bad-request', 'unavailable', 'model-download', 'aborted', 'extension'])
+const FINAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['quota', 'upgrade', 'model-locked', 'auth', 'bad-request', 'aborted', 'extension'])
 
 const SUSPECT_MIN_SOURCE = 40
 const SUSPECT_RATIO = 0.1
@@ -133,23 +109,24 @@ export async function translateBatch(
   onItem: (index: number, text: string) => void,
   signal: AbortSignal,
 ): Promise<BatchOutcome> {
-  const translate = await groupTranslator(settings, context)
-  const checkLength = !['google', 'chrome-translator'].includes(settings.provider)
-  const results: Array<string | undefined> = texts.map((text) => cache.get(cacheKey(settings, text)))
+  const cfg = await chatConfig(settings)
+  const translate = groupTranslator(cfg, settings.targetLang, context)
+  const keyOf = (text: string) => cacheKey(cfg.model, settings.targetLang, text)
+  const results: Array<string | undefined> = texts.map((text) => cache.get(keyOf(text)))
   results.forEach((text, i) => text !== undefined && onItem(i, text))
   /** First-pass translations that looked truncated: used only if the retry brings nothing. */
   const suspects = new Map<number, string>()
 
   const accept = (index: number, text: string) => {
     results[index] = text
-    cache.set(cacheKey(settings, texts[index]), text)
+    cache.set(keyOf(texts[index]), text)
     onItem(index, text)
   }
 
   const requestGroup = async (indices: number[], isRetry: boolean) => {
     const deliver = (index: number, text: string) => {
       if (results[index] !== undefined || !text.trim()) return
-      if (!isRetry && checkLength && looksTruncated(texts[index], text)) suspects.set(index, text)
+      if (!isRetry && looksTruncated(texts[index], text)) suspects.set(index, text)
       else accept(index, text)
     }
     await pool.run(
@@ -183,7 +160,7 @@ export async function translateBatch(
 
   const failed = missing()
   if (!failed.length) return { failed }
-  return { failed, error: error ?? new ApiError('bad-response', '模型漏译了部分段落') }
+  return { failed, error: error ?? new ApiError('bad-response', 'missedItems') }
 }
 
 /** Selection popover: if the text is already in the target language, translate the other way. */
@@ -200,18 +177,9 @@ export async function streamTextTranslation(
   onDelta: (piece: string) => void,
   signal: AbortSignal,
 ): Promise<void> {
-  const { provider } = settings
-  let job: () => Promise<void>
-  if (provider === 'google') {
-    const key = googleKey(settings)
-    job = async () => onDelta((await googleTranslate(key, [text], language.code, 'text', signal))[0])
-  } else if (isChromeAiProvider(provider)) {
-    job = () => runChromeAi({ kind: 'text', provider, text, targetLang: language.code }, (event) => event.type === 'delta' && onDelta(event.text), signal)
-  } else {
-    const cfg = await chatConfig(settings)
-    job = async () => {
-      for await (const delta of streamChat(cfg, buildTextMessages(text, language.prompt), { signal })) onDelta(delta)
-    }
+  const cfg = await chatConfig(settings)
+  const job = async () => {
+    for await (const delta of streamChat(cfg, buildTextMessages(text, language.prompt), { signal })) onDelta(delta)
   }
   await pool.run(job, { signal, priority: 'high' })
 }

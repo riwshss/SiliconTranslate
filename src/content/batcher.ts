@@ -1,3 +1,4 @@
+import type { Translate } from '../shared/i18n'
 import { PORT_BATCH, type BatchEvent, type BatchRequest, type ErrorCode } from '../shared/messages'
 
 const FLUSH_DELAY_MS = 60
@@ -21,6 +22,7 @@ export class Batcher {
   constructor(
     private readonly hooks: BatcherHooks,
     private readonly getContext: () => string,
+    private readonly getT: () => Translate,
   ) {}
 
   enqueue(key: string): void {
@@ -59,7 +61,7 @@ export class Batcher {
     try {
       port = chrome.runtime.connect({ name: PORT_BATCH })
     } catch {
-      this.hooks.onFail(keys, 'extension', '扩展已更新或被禁用，请刷新页面')
+      this.hooks.onFail(keys, 'extension', this.getT()('extensionGone'))
       return
     }
     this.ports.add(port)
@@ -78,13 +80,13 @@ export class Batcher {
         return
       }
       isEnded = true
-      failRemaining(event.error?.code ?? 'bad-response', event.error?.message ?? '部分段落翻译失败')
+      failRemaining(event.error?.code ?? 'bad-response', event.error?.message ?? this.getT()('partialFail'))
       this.ports.delete(port)
       port.disconnect()
     })
     port.onDisconnect.addListener(() => {
       this.ports.delete(port)
-      if (!isEnded) failRemaining('network', '与扩展后台的连接中断，请重试')
+      if (!isEnded) failRemaining('network', this.getT()('portLost'))
     })
     const request: BatchRequest = { texts: keys, context: this.getContext() }
     port.postMessage(request)

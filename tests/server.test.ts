@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { handleRequest, parseChatRequest, type Deps, type Env, type QuotaStore } from '../server/src/app'
+import { handleRequest, MODELS, parseChatRequest, PLAN_MODELS, type Deps, type Env, type QuotaStore } from '../server/src/app'
 import { consume, usedToday, type QuotaState } from '../server/src/quota'
 
 const INSTALL = '3f2a8c1e-1b2c-4d5e-8f90-1234567890ab'
 
 const env: Env = {
   OPENROUTER_API_KEY: 'or-secret',
-  OPENROUTER_MODEL: 'google/gemini-2.5-flash-lite',
   INSTALL_DAILY_CHARS: '1000',
   IP_DAILY_CHARS: '10000',
   GLOBAL_DAILY_CHARS: '100000',
@@ -41,7 +40,7 @@ function chat(content: string, extra: Record<string, unknown> = {}, headers: Rec
   return new Request('https://api.test/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '1.2.3.4', ...headers },
-    body: JSON.stringify({ model: 'client-choice', messages: [{ role: 'user', content }], stream: true, ...extra }),
+    body: JSON.stringify({ model: 'deepseek/deepseek-v4-flash', messages: [{ role: 'user', content }], stream: true, ...extra }),
   })
 }
 
@@ -70,8 +69,19 @@ describe('quota math', () => {
 
 describe('parseChatRequest', () => {
   it('keeps only messages and sampling knobs, clamping max_tokens to the server ceiling', () => {
-    const req = parseChatRequest({ model: 'gpt-x', messages: [{ role: 'user', content: 'hi' }], max_tokens: 99999, temperature: 7 }, 512)
-    expect(req).toEqual({ messages: [{ role: 'user', content: 'hi' }], stream: false, temperature: 1, maxTokens: 512 })
+    const req = parseChatRequest({ model: 'openai/gpt-6-sol', messages: [{ role: 'user', content: 'hi' }], max_tokens: 99999, temperature: 7 }, 512)
+    expect(req).toEqual({ model: 'openai/gpt-6-sol', messages: [{ role: 'user', content: 'hi' }], stream: false, temperature: 1, maxTokens: 512 })
+  })
+
+  it('only accepts known models and leaves the default to the plan', () => {
+    const messages = [{ role: 'user', content: 'hi' }]
+    expect(MODELS).toEqual(['deepseek/deepseek-v4-flash', 'anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash'])
+    expect(PLAN_MODELS.beta).toEqual(['deepseek/deepseek-v4-flash'])
+    expect(parseChatRequest({ messages }, 512)?.model).toBeNull()
+    // Extension v2.0 always sent "silk-cloud": it keeps working on the plan default.
+    expect(parseChatRequest({ model: 'silk-cloud', messages }, 512)?.model).toBeNull()
+    expect(parseChatRequest({ model: 'openai/gpt-6-astra', messages }, 512)).toBeNull()
+    expect(parseChatRequest({ model: 42, messages }, 512)).toBeNull()
   })
 
   it('rejects malformed bodies', () => {
@@ -98,11 +108,11 @@ describe('handleRequest', () => {
       success: true,
       error: null,
       // "hello" is 5 characters, but every request costs at least the 200-character minimum.
-      data: { plan: 'beta', features: ['cloud-ai'], quota: { used: 200, limit: 1000 } },
+      data: { plan: 'beta', features: ['cloud-ai'], models: ['deepseek/deepseek-v4-flash'], quota: { used: 200, limit: 1000 } },
     })
   })
 
-  it('forwards to OpenRouter with the server key and model, never the client choice', async () => {
+  it('forwards to OpenRouter with the server key and the chosen model, reasoning off', async () => {
     const { deps, fetchMock } = setup()
     const res = await handleRequest(chat('hello'), env, deps)
     expect(res.status).toBe(200)
@@ -111,7 +121,27 @@ describe('handleRequest', () => {
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer or-secret')
     // Output is capped by input size (5 chars * 2 + 256), so a tiny prompt cannot buy a long answer.
-    expect(JSON.parse(init?.body as string)).toMatchObject({ model: 'google/gemini-2.5-flash-lite', stream: true, max_tokens: 266 })
+    expect(JSON.parse(init?.body as string)).toMatchObject({ model: 'deepseek/deepseek-v4-flash', stream: true, max_tokens: 266, reasoning: { effort: 'none' } })
+  })
+
+  it('uses the plan default when the client names no model', async () => {
+    const { deps, fetchMock } = setup()
+    const body = JSON.stringify({ messages: [{ role: 'user', content: 'hello' }], stream: true })
+    const req = new Request('https://api.test/v1/chat/completions', { method: 'POST', headers: { 'X-Silk-Install': INSTALL }, body })
+    expect((await handleRequest(req, env, deps)).status).toBe(200)
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string).model).toBe('deepseek/deepseek-v4-flash')
+  })
+
+  it('refuses models the beta plan does not include, without spending quota', async () => {
+    const { deps, fetchMock } = setup()
+    for (const model of ['anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash']) {
+      const res = await handleRequest(chat('hello', { model }), env, deps)
+      expect(res.status).toBe(403)
+      expect(res.headers.get('X-Silk-Error')).toBe('model_locked')
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+    const res = await handleRequest(new Request('https://api.test/v1/entitlement', { headers: { 'X-Silk-Install': INSTALL } }), env, deps)
+    expect(await res.json()).toMatchObject({ data: { quota: { used: 0 } } })
   })
 
   it('answers 429 quota_exceeded once the daily quota is spent, without calling the AI', async () => {
@@ -132,6 +162,13 @@ describe('handleRequest', () => {
     expect((await handleRequest(chat('y'.repeat(300)), tightIp, deps)).status).toBe(429)
     const res = await handleRequest(new Request('https://api.test/v1/entitlement', { headers: { 'X-Silk-Install': INSTALL } }), tightIp, deps)
     expect(await res.json()).toMatchObject({ data: { quota: { used: 0 } } })
+  })
+
+  it('refuses models outside the allowlist without spending quota', async () => {
+    const { deps, fetchMock } = setup()
+    const res = await handleRequest(chat('hello', { model: 'openai/gpt-6-astra-pro' }), env, deps)
+    expect(res.status).toBe(400)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('rejects oversized requests before spending quota', async () => {

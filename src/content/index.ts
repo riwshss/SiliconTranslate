@@ -1,3 +1,4 @@
+import { resolveUiLang, translator } from '../shared/i18n'
 import type { TabMessage } from '../shared/messages'
 import { loadSettings, onSettingsChanged, type DisplayMode, type TranslateMode } from '../shared/settings'
 import { matchesShortcut } from '../shared/shortcut'
@@ -29,28 +30,35 @@ async function main(): Promise<void> {
   let settings = await loadSettings()
   const host = location.hostname
   const ui = createUiHost()
-  const translator = new PageTranslator(settings)
-  const hud = createHud(ui, {
-    onMode: (mode) => translator.setMode(mode),
-    onRetry: () => translator.retryFailed(),
-  })
-  translator.subscribe((state) => hud.update(state))
-  createSelectionTranslator(ui, () => settings.selectionEnabled && settings.domainRules[host] !== 'never')
+  const t = () => translator(resolveUiLang(settings.uiLang))
+  const pageTranslator = new PageTranslator(settings)
+  const hud = createHud(
+    ui,
+    {
+      onMode: (mode) => pageTranslator.setMode(mode),
+      onRetry: () => pageTranslator.retryFailed(),
+    },
+    t(),
+  )
+  pageTranslator.subscribe((state) => hud.update(state))
+  createSelectionTranslator(ui, () => settings.selectionEnabled && settings.domainRules[host] !== 'never', t)
 
   onSettingsChanged((next) => {
+    const isLangChanged = next.uiLang !== settings.uiLang
     settings = next
-    translator.updateSettings(next)
+    pageTranslator.updateSettings(next)
+    if (isLangChanged) hud.setTranslate(t())
   })
 
   const setMode = (mode: DisplayMode) => {
     hud.reveal()
-    translator.setMode(mode)
+    pageTranslator.setMode(mode)
   }
 
   chrome.runtime.onMessage.addListener((message: TabMessage, sender, sendResponse) => {
     if (sender.id !== chrome.runtime.id) return false
     if (message?.type === 'silk:set-mode' && isDisplayMode(message.mode)) setMode(message.mode)
-    if (message?.type === 'silk:get-state' || message?.type === 'silk:set-mode') sendResponse(translator.getState())
+    if (message?.type === 'silk:get-state' || message?.type === 'silk:set-mode') sendResponse(pageTranslator.getState())
     return false
   })
 
@@ -60,7 +68,7 @@ async function main(): Promise<void> {
       if (e.repeat || !matchesShortcut(e, settings.shortcut)) return
       e.preventDefault()
       e.stopPropagation()
-      setMode(nextMode(translator.getState().mode, settings.defaultMode))
+      setMode(nextMode(pageTranslator.getState().mode, settings.defaultMode))
     },
     true,
   )

@@ -3,13 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 
 [vars]
-# Any OpenRouter model id: https://openrouter.ai/models
-OPENROUTER_MODEL = "google/gemini-2.5-flash-lite"
+# Models are an allowlist in src/app.ts (MODELS); PLAN_MODELS decides which ones each plan may
+# use (the beta only gets deepseek/deepseek-v4-flash). The extension picks one per request.
 # Daily limits, counted in prompt characters, reset at UTC midnight.
-INSTALL_DAILY_CHARS = "200000"
-IP_DAILY_CHARS = "600000"
+INSTALL_DAILY_CHARS = "2000000"
+IP_DAILY_CHARS = "6000000"
 # Wallet guard across all users; raise as the beta grows.
-GLOBAL_DAILY_CHARS = "20000000"
+GLOBAL_DAILY_CHARS = "200000000"
 # Single request ceilings.
 MAX_REQUEST_CHARS = "24000"
 MAX_OUTPUT_TOKENS = "8192"

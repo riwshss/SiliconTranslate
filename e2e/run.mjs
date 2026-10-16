@@ -1,6 +1,5 @@
 // End-to-end check in a real Chromium with the unpacked extension loaded.
 // Usage: npm run e2e   (builds an E2E variant whose Silk backend is the mock server; screenshots → e2e/output/)
-//        EXT_DIR=release/silk-translate-vX npm run e2e   (packaged build: the cloud-engine section is skipped)
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,20 +7,16 @@ import { join, resolve } from 'node:path'
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= 'D:\\DevCache\\ms-playwright'
 const { chromium } = await import('playwright')
-const { startMockServer, stats, cloud } = await import('./mock-server.mjs')
+const { startMockServer, stats, cloud, ALL_MODELS } = await import('./mock-server.mjs')
 
 const MOCK_PORT = 18787
 const MOCK_ORIGIN = `http://127.0.0.1:${MOCK_PORT}`
 const OUT = resolve('e2e/output')
 mkdirSync(OUT, { recursive: true })
 
-// EXT_DIR lets the release check run the suite against the packaged build; otherwise build a
-// variant whose cloud engine talks to the mock server.
-const isCloudMocked = !process.env.EXT_DIR
-const DIST = resolve(process.env.EXT_DIR ?? join(OUT, 'ext'))
-if (isCloudMocked) {
-  execFileSync(process.execPath, ['build.mjs'], { stdio: 'inherit', env: { ...process.env, SILK_API_URL: MOCK_ORIGIN, SILK_OUTDIR: DIST } })
-}
+// Build a variant whose Silk backend is the mock server (a packaged build would hit production).
+const DIST = join(OUT, 'ext')
+execFileSync(process.execPath, ['build.mjs'], { stdio: 'inherit', env: { ...process.env, SILK_API_URL: MOCK_ORIGIN, SILK_OUTDIR: DIST } })
 
 const results = []
 async function check(name, fn) {
@@ -51,9 +46,10 @@ const context = await chromium.launchPersistentContext(profile, {
 try {
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
   const extensionId = new URL(worker.url()).host
-  await worker.evaluate(
-    (baseUrl) => chrome.storage.local.set({ settings: { provider: 'openai', apiKey: 'sk-test', baseUrl, model: 'mock/model-a' } }),
-    `${origin}/v1`,
+  // Settings left over from older versions (engine, API key) must be ignored, and the chosen model is
+  // locked during the beta (requests fall back to the cheapest); Chinese UI for the checks below.
+  await worker.evaluate(() =>
+    chrome.storage.local.set({ settings: { provider: 'openai', apiKey: 'sk-test', model: 'google/gemini-3.8-flash', uiLang: 'zh-CN' } }),
   )
 
   const page = await context.newPage()
@@ -71,6 +67,11 @@ try {
   await check('首屏段落被翻译（429 后自动重试成功）', async () => {
     await page.waitForFunction(() => document.getElementById('p1').textContent.includes('译·'), null, { timeout: 15000 })
     assert(stats.rateLimited === 1, `rateLimited=${stats.rateLimited}`)
+  })
+  await check('请求走 Silk 后端：测试期只用最便宜的模型、匿名安装 ID、不带 API Key', async () => {
+    assert(cloud.models.length > 0 && cloud.models.every((m) => m === 'deepseek/deepseek-v4-flash'), cloud.models.join(','))
+    assert(cloud.installIds.size === 1, `install ids ${cloud.installIds.size}`)
+    assert(cloud.withAuthorization === 0, 'Authorization header leaked to the Silk backend')
   })
   await check('内联结构保留：链接节点、href、strong、code 都没变', async () => {
     const info = await page.evaluate(() => ({
@@ -176,10 +177,36 @@ try {
   const popup = await context.newPage()
   await popup.setViewportSize({ width: 372, height: 900 })
   await popup.goto(`chrome-extension://${extensionId}/popup.html`)
-  await check('测试连接成功并拉取模型列表', async () => {
-    await popup.click('#test-btn')
-    await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('连接成功'))
-    assert((await popup.$$eval('#model-list option', (o) => o.length)) === 2, 'models')
+  await check('Popup 显示测试版与今日额度（200万字）', async () => {
+    await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('今日已用'))
+    const result = await popup.$eval('#test-result', (el) => el.textContent)
+    assert(result.includes('测试版') && result.includes('1234') && result.includes('200万'), result)
+    assert((await popup.$eval('#conn', (el) => el.textContent)) === '可用', 'conn pill')
+    assert(!(await popup.$eval('#beta-badge', (el) => el.hidden)), 'beta badge hidden')
+  })
+  const modelCards = () =>
+    popup.$$eval('.model', (cards) => cards.map((c) => [c.dataset.value, c.getAttribute('aria-checked'), c.getAttribute('aria-disabled')]))
+  const storedModel = () => worker.evaluate(() => chrome.storage.local.get('settings').then((s) => s.settings.model))
+  await check('测试期：四个模型里只有 DeepSeek V4 Flash 可选，其余锁定并提示', async () => {
+    const cards = await modelCards()
+    const expected = [
+      ['deepseek/deepseek-v4-flash', 'true', 'false'],
+      ['anthropic/claude-haiku-5.5', 'false', 'true'],
+      ['openai/gpt-6-sol', 'false', 'true'],
+      ['google/gemini-3.8-flash', 'false', 'true'],
+    ]
+    assert(JSON.stringify(cards) === JSON.stringify(expected), JSON.stringify(cards))
+    assert(!(await popup.$eval('#models-hint', (el) => el.hidden)), 'beta hint hidden')
+    assert((await popup.$eval('.model[data-value="openai/gpt-6-sol"] .model-note', (el) => el.textContent)) === '正式版开放', 'locked note')
+    assert((await popup.$$('#provider, #api-key, #google-key, #base-url')).length === 0, 'old engine controls still present')
+  })
+  await check('点击锁定的模型无效，点击可用模型写入 storage', async () => {
+    await popup.click('.model[data-value="anthropic/claude-haiku-5.5"]', { force: true })
+    await popup.waitForTimeout(300)
+    assert((await storedModel()) === 'google/gemini-3.8-flash', await storedModel())
+    await popup.click('.model[data-value="deepseek/deepseek-v4-flash"]')
+    await popup.waitForTimeout(300)
+    assert((await storedModel()) === 'deepseek/deepseek-v4-flash', await storedModel())
   })
   await check('修改目标语言写入 storage', async () => {
     await popup.selectOption('#lang', 'ja')
@@ -190,21 +217,32 @@ try {
   })
   await popup.screenshot({ path: join(OUT, '4-popup-light.png'), fullPage: true })
   await popup.emulateMedia({ colorScheme: 'dark' })
+  await popup.waitForTimeout(400) // let background transitions finish
   await popup.screenshot({ path: join(OUT, '5-popup-dark.png'), fullPage: true })
   await popup.emulateMedia({ colorScheme: 'light' })
+  await popup.waitForTimeout(400) // let background transitions finish
 
-  if (isCloudMocked) {
-    console.log('\nSilk AI 云端引擎（mock 后端）')
-    await popup.selectOption('#provider', 'cloud')
-    await check('Popup 显示测试版与今日额度', async () => {
-      await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('今日已用'))
-      const result = await popup.$eval('#test-result', (el) => el.textContent)
-      assert(result.includes('测试版') && result.includes('1234'), result)
-      assert((await popup.$eval('#conn', (el) => el.textContent)) === '可用', 'conn pill')
-      assert(!(await popup.$eval('#beta-badge', (el) => el.hidden)), 'beta badge hidden')
+  console.log('\nEnglish UI')
+  await check('界面语言切到 English：Popup 文案与额度显示', async () => {
+    await popup.selectOption('#ui-lang', 'en')
+    await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('Used today'))
+    assert((await popup.$eval('#translate-btn', (el) => el.textContent.trim())) === 'Translate this page', 'translate button')
+    assert((await popup.$eval('#test-result', (el) => el.textContent)).includes('2M'), 'quota in English')
+    assert((await popup.$eval('html', (el) => el.lang)) === 'en', 'html lang')
+    assert((await popup.$eval('#host', (el) => el.textContent)) === 'chrome-extension page', 'host label')
+  })
+  await popup.screenshot({ path: join(OUT, '6-popup-english.png'), fullPage: true })
+  await check('页面 HUD 随之切换为英文', async () => {
+    await page.waitForFunction(() => {
+      const root = document.querySelector('silk-ui').shadowRoot
+      return root.querySelector('.seg button[data-mode="original"]').textContent === 'Original'
     })
-    await popup.screenshot({ path: join(OUT, '6-popup-cloud.png'), fullPage: true })
+  })
+  await popup.selectOption('#ui-lang', 'zh-CN')
+  await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('今日已用'))
 
+  {
+    console.log('\nSilk AI 云端引擎（mock 后端）')
     const selectAndTranslate = async (selector) => {
       await page.bringToFront()
       await page.mouse.click(5, 5)
@@ -213,14 +251,44 @@ try {
       await page.click('silk-ui .trigger')
     }
     const cardText = () => page.$eval('silk-ui', (el) => el.shadowRoot.querySelector('.result')?.textContent ?? '')
-    await check('划词翻译走 Silk 后端：匿名安装 ID、不带 API Key', async () => {
+    await check('直接请求锁定模型会被后端拒绝（403 model_locked）', async () => {
+      const res = await fetch(`${origin}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Silk-Install': [...cloud.installIds][0] },
+        body: JSON.stringify({ model: 'openai/gpt-6-sol', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+      })
+      assert(res.status === 403 && res.headers.get('x-silk-error') === 'model_locked', `${res.status}`)
+    })
+    await check('正式版（pro）解锁全部模型：选 GPT-6 Sol 后请求使用它', async () => {
+      cloud.plan = 'pro'
+      cloud.planModels = ALL_MODELS
+      await popup.bringToFront()
+      await popup.click('#test-btn')
+      await popup.waitForFunction(() => document.querySelectorAll('.model[aria-disabled="true"]').length === 0)
+      assert(await popup.$eval('#models-hint', (el) => el.hidden), 'beta hint still shown')
+      await popup.click('.model[data-value="openai/gpt-6-sol"]')
+      await popup.waitForTimeout(300)
+      assert((await storedModel()) === 'openai/gpt-6-sol', await storedModel())
+      const before = cloud.models.length
+      await selectAndTranslate('#p2')
+      await page.waitForFunction(() => document.querySelector('silk-ui').shadowRoot.querySelector('.result').textContent.includes('划词译文'), null, {
+        timeout: 10000,
+      })
+      assert(cloud.models.slice(before).every((m) => m === 'openai/gpt-6-sol') && cloud.models.length > before, cloud.models.slice(before).join(','))
+      cloud.plan = 'beta'
+      cloud.planModels = ALL_MODELS.slice(0, 1)
+      await popup.click('#test-btn')
+      await popup.waitForFunction(() => document.querySelectorAll('.model[aria-disabled="true"]').length === 3)
+    })
+    await check('划词翻译走 Silk 后端：测试期回落到最便宜的模型、匿名安装 ID、不带 API Key', async () => {
+      const before = cloud.models.length
       await selectAndTranslate('#title')
       await page.waitForFunction(
         () => document.querySelector('silk-ui').shadowRoot.querySelector('.result').textContent.includes('划词译文：Building'),
         null,
         { timeout: 10000 },
       )
-      assert(cloud.requests >= 1, `cloud requests ${cloud.requests}`)
+      assert(cloud.models.slice(before).every((m) => m === 'deepseek/deepseek-v4-flash') && cloud.models.length > before, cloud.models.slice(before).join(','))
       assert(cloud.installIds.size === 1, `install ids ${cloud.installIds.size}`)
       assert(cloud.withAuthorization === 0, 'Authorization header leaked to the Silk backend')
     })

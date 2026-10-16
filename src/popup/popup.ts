@@ -1,48 +1,35 @@
-import { batchSystemPrompt } from '../core/prompt'
-import {
-  ChromeAiError,
-  createDetector,
-  createLanguageModel,
-  createTranslator,
-  detectorAvailability,
-  hasLanguageModel,
-  hasTranslator,
-  isNanoOutputSupported,
-  languageModelAvailability,
-  translatorAvailability,
-  type Availability,
-} from '../shared/chrome-ai'
-import { describeQuota, PLAN_LABELS } from '../shared/entitlement'
-import { chromeAiLanguage, getLanguage, LANGUAGES, normalizeDetected } from '../shared/languages'
-import type { AccountRequest, AccountResult, PageState, TabMessage, TestConnectionRequest, TestConnectionResult } from '../shared/messages'
+import { canUseCloudAi, defaultEntitlement, describeQuota, effectiveModel, PLAN_LABELS, sanitizeEntitlement, type Entitlement } from '../shared/entitlement'
+import { resolveUiLang, translator, UI_LANG_SETTINGS, type MessageKey, type Translate, type UiLangSetting } from '../shared/i18n'
+import { LANGUAGES } from '../shared/languages'
+import type { AccountRequest, AccountResult, PageState, TabMessage } from '../shared/messages'
 import { RELEASE_CHANNEL } from '../shared/service'
 import {
-  GOOGLE_TRANSLATE_URL,
-  hostPermissionFor,
-  isChromeAiProvider,
+  CLOUD_MODELS,
   loadSettings,
-  MODEL_PRESETS,
-  PROVIDERS,
   saveSettings,
   withDomainRule,
   type BilingualStyle,
   type DisplayMode,
   type DomainRule,
-  type Provider,
   type Settings,
   type TranslateMode,
 } from '../shared/settings'
 import { eventToShortcut, isValidShortcut } from '../shared/shortcut'
 import { segmented } from './segmented'
 
-const CUSTOM_MODEL = '__custom__'
-const SAVE_DEBOUNCE_MS = 400
-
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 let settings: Settings
 let tabId: number | null = null
 let host = ''
+/** Last page state, note and non-web scheme, kept so a language switch can re-render them. */
+let pageState: PageState | null = null
+let pageNote: MessageKey | null = null
+let pageScheme: string | null = null
+/** Plan as last reported by the backend (cached by the service worker); decides which models are open. */
+let entitlement: Entitlement = defaultEntitlement(RELEASE_CHANNEL)
+
+const t: Translate = (key, params) => translator(resolveUiLang(settings?.uiLang ?? 'auto'))(key, params)
 
 // ───────────── persistence ─────────────
 
@@ -56,15 +43,7 @@ async function persist(patch: Partial<Settings>): Promise<void> {
     savedTimer = setTimeout(() => saved.classList.remove('is-visible'), 1200)
   } catch (err) {
     console.error('[silk] failed to save settings', err)
-    setTestResult('保存设置失败，请重试', 'error')
-  }
-}
-
-function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number) {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  return (...args: A) => {
-    clearTimeout(timer)
-    timer = setTimeout(() => fn(...args), ms)
+    setTestResult(t('saveFailed'), 'error')
   }
 }
 
@@ -84,6 +63,7 @@ async function sendToTab(message: TabMessage): Promise<PageState> {
 const modeSeg = segmented($('mode-seg'), (value) => void setPageMode(value as DisplayMode))
 
 function renderPageState(state: PageState | null): void {
+  pageState = state
   const button = $<HTMLButtonElement>('translate-btn')
   const isActive = !!state && state.started
   button.hidden = isActive
@@ -92,17 +72,18 @@ function renderPageState(state: PageState | null): void {
   if (isActive) modeSeg.setValue(state.mode)
   const status = $('page-status')
   if (!state || !state.started) status.textContent = ''
-  else if (state.failed) status.textContent = `${state.failed} 段失败`
-  else if (state.total > state.done) status.textContent = `翻译中 ${state.done}/${state.total}`
-  else status.textContent = state.total ? `已翻译 ${state.done} 段` : ''
+  else if (state.failed) status.textContent = t('pageFailed', { n: state.failed })
+  else if (state.total > state.done) status.textContent = t('pageTranslating', { done: state.done, total: state.total })
+  else status.textContent = state.total ? t('pageTranslated', { n: state.done }) : ''
 }
 
-function disablePage(note: string): void {
+function disablePage(note: MessageKey): void {
+  pageNote = note
   $<HTMLButtonElement>('translate-btn').disabled = true
   $('rule-seg').style.pointerEvents = 'none'
   $('rule-seg').style.opacity = '0.5'
   const el = $('page-note')
-  el.textContent = note
+  el.textContent = t(note)
   el.hidden = false
 }
 
@@ -110,7 +91,7 @@ async function setPageMode(mode: DisplayMode): Promise<void> {
   try {
     renderPageState(await sendToTab({ type: 'silk:set-mode', mode }))
   } catch {
-    disablePage('无法在此页面运行翻译，请刷新页面后重试')
+    disablePage('pageCannotRun')
   }
 }
 
@@ -119,8 +100,9 @@ async function initPage(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   const url = tab?.url ? new URL(tab.url) : null
   if (!tab?.id || !url || !/^https?:$/.test(url.protocol)) {
-    $('host').textContent = url ? url.protocol.replace(':', '') + ' 页面' : '—'
-    disablePage('浏览器内部页面不支持翻译')
+    pageScheme = url ? url.protocol.replace(':', '') : null
+    $('host').textContent = pageScheme ? t('pageKind', { kind: pageScheme }) : '—'
+    disablePage('pageUnsupported')
     return
   }
   tabId = tab.id
@@ -169,7 +151,7 @@ function initShortcutRecorder(): void {
   button.addEventListener('click', () => {
     isRecording = true
     button.classList.add('is-recording')
-    button.textContent = '请按下组合键…'
+    button.textContent = t('shortcutRecording')
   })
   button.addEventListener('blur', () => isRecording && stop())
   button.addEventListener('keydown', (e) => {
@@ -182,7 +164,7 @@ function initShortcutRecorder(): void {
       button.classList.remove('is-invalid')
       void button.offsetWidth
       button.classList.add('is-invalid')
-      button.textContent = '需包含 Ctrl / Alt / ⌘'
+      button.textContent = t('shortcutInvalid')
       return
     }
     button.classList.remove('is-invalid')
@@ -190,7 +172,7 @@ function initShortcutRecorder(): void {
   })
 }
 
-// ───────────── API ─────────────
+// ───────────── Silk AI ─────────────
 
 function setTestResult(text: string, kind: 'ok' | 'error' | '' = ''): void {
   const el = $('test-result')
@@ -198,311 +180,148 @@ function setTestResult(text: string, kind: 'ok' | 'error' | '' = ''): void {
   el.className = `small ${kind}`
 }
 
-function setConn(state: 'idle' | 'warn' | 'ok' | 'error', text: string): void {
+function setConn(state: 'idle' | 'warn' | 'ok' | 'error', key: MessageKey): void {
   const pill = $('conn')
   pill.dataset.state = state
-  pill.textContent = text
+  pill.textContent = t(key)
 }
 
-function currentModel(): string {
-  const select = $<HTMLSelectElement>('model-select')
-  return select.value === CUSTOM_MODEL ? $<HTMLInputElement>('model-custom').value.trim() : select.value
+function modelCards(): HTMLButtonElement[] {
+  return [...document.querySelectorAll<HTMLButtonElement>('.model')]
 }
 
-function initModelPicker(): void {
-  const select = $<HTMLSelectElement>('model-select')
-  const custom = $<HTMLInputElement>('model-custom')
-  const options = MODEL_PRESETS.map(({ id, note }) => new Option(`${id}（${note}）`, id))
-  select.replaceChildren(...options, new Option('自定义模型…', CUSTOM_MODEL))
-  const isPreset = MODEL_PRESETS.some((m) => m.id === settings.model)
-  select.value = isPreset ? settings.model : CUSTOM_MODEL
-  custom.value = isPreset ? '' : settings.model
-  custom.hidden = isPreset
+const isLocked = (card: HTMLElement) => !entitlement.models.includes(card.dataset.value ?? '')
 
-  select.addEventListener('change', () => {
-    custom.hidden = select.value !== CUSTOM_MODEL
-    if (!custom.hidden) custom.focus()
-    if (currentModel()) void persist({ model: currentModel() })
+/**
+ * Marks the model actually used (a locked choice shows its fallback) and greys out models the
+ * plan does not include. Safe to call again after the plan or the language changed.
+ */
+function renderModels(): void {
+  const active = effectiveModel(entitlement, settings.model) ?? settings.model
+  const cards = modelCards()
+  cards.forEach((card) => {
+    const model = CLOUD_MODELS.find((m) => m.id === card.dataset.value)
+    const locked = isLocked(card)
+    const isActive = card.dataset.value === active
+    card.setAttribute('aria-checked', String(isActive))
+    card.setAttribute('aria-disabled', String(locked))
+    card.classList.toggle('is-locked', locked)
+    card.tabIndex = isActive ? 0 : -1
+    const note = card.querySelector('.model-note')
+    if (model && note) note.textContent = t(locked ? 'modelLocked' : model.note)
   })
-  custom.addEventListener('input', debounce(() => currentModel() && void persist({ model: currentModel() }), SAVE_DEBOUNCE_MS))
+  $('models-hint').hidden = entitlement.plan !== 'beta' || !cards.some(isLocked)
 }
 
-/**
- * Custom endpoints need a host permission, otherwise the call only works if the server sends CORS
- * headers. Must run inside a user gesture; returns false when the user declines.
- */
-async function ensureHostPermission(endpoint: string): Promise<boolean> {
-  const pattern = hostPermissionFor(endpoint)
-  if (!pattern) return true
-  try {
-    return await chrome.permissions.request({ origins: [pattern] })
-  } catch (err) {
-    console.error('[silk] host permission request failed', err)
-    return false
+/** One radio card per model; arrow keys move the choice like a native radio group, skipping locked ones. */
+function initModelPicker(): void {
+  const root = $('models')
+  const cards = CLOUD_MODELS.map(({ id, label }) => {
+    const card = document.createElement('button')
+    card.type = 'button'
+    card.className = 'model'
+    card.setAttribute('role', 'radio')
+    card.dataset.value = id
+    const name = document.createElement('span')
+    name.className = 'model-name'
+    name.textContent = label
+    const note = document.createElement('span')
+    note.className = 'model-note'
+    card.append(name, note)
+    return card
+  })
+  root.replaceChildren(...cards)
+
+  const select = async (card: HTMLButtonElement) => {
+    if (isLocked(card) || card.dataset.value === settings.model) return
+    await persist({ model: card.dataset.value })
+    renderModels()
   }
+  cards.forEach((card, i) => {
+    card.addEventListener('click', () => void select(card))
+    card.addEventListener('keydown', (e) => {
+      const step = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
+      if (!step) return
+      e.preventDefault()
+      for (let k = 1; k < cards.length; k++) {
+        const next = cards[(i + step * k + cards.length * k) % cards.length]
+        if (isLocked(next)) continue
+        next.focus()
+        void select(next)
+        return
+      }
+    })
+  })
+  renderModels()
 }
 
-const README_URL = 'https://github.com/riwshss/SiliconTranslate#readme'
-
-const PROVIDER_UI: Record<Provider, { help: [string, string]; test: string; note?: string }> = {
-  cloud: {
-    help: ['使用说明 ↗', README_URL],
-    test: '查看额度',
-    note: 'Silk AI 通过 OpenRouter 聚合平台调用大模型，开箱即用，无需 API Key。测试期间所有功能免费，每天有免费额度。翻译时网页文本会发送到 Silk 翻译服务处理，不会被保存。',
-  },
-  openai: { help: ['获取 API Key ↗', 'https://cloud.siliconflow.cn/account/ak'], test: '测试连接' },
-  google: { help: ['获取 Google API Key ↗', 'https://console.cloud.google.com/apis/credentials'], test: '测试连接' },
-  'chrome-translator': {
-    help: ['关于 Chrome 内置 AI ↗', 'https://developer.chrome.com/docs/ai/translator-api'],
-    test: '检查 / 下载模型',
-    note: '使用 Chrome 内置的本地翻译模型，网页内容不离开本机，无需 API Key。需桌面版 Chrome 138+；首次使用请点下方按钮，下载当前网页语言与英语到目标语言的模型。',
-  },
-  'chrome-nano': {
-    help: ['关于 Gemini Nano ↗', 'https://developer.chrome.com/docs/ai/prompt-api'],
-    test: '检查 / 下载模型',
-    note: '使用 Chrome 内置的 Gemini Nano 小模型，网页内容不离开本机。需桌面版 Chrome 138+、22 GB 可用磁盘，以及 4 GB 以上显存或 16 GB 内存。官方目前仅支持英 / 日 / 西 / 德 / 法输出，其他目标语言效果可能不稳定。',
-  },
-}
-
-function activeKey(): string {
-  if (settings.provider === 'openai') return settings.apiKey
-  if (settings.provider === 'google') return settings.googleApiKey
-  return ''
-}
-
-function renderKeyConn(): void {
-  setConn(activeKey() ? 'idle' : 'warn', activeKey() ? '已配置' : '未配置')
-}
-
-/** Reflects on-device model status without downloading anything. */
-async function renderChromeStatus(): Promise<void> {
-  const provider = settings.provider
-  const target = chromeAiLanguage(settings.targetLang)
-  let state: Availability
-  try {
-    if (provider === 'chrome-translator') {
-      const pair = { sourceLanguage: target === 'en' ? 'zh' : 'en', targetLanguage: target }
-      const [detector, translator] = await Promise.all([detectorAvailability(), translatorAvailability(pair)])
-      // The detector is optional: without it the offscreen document guesses the source by script.
-      const isDetectorReady = detector === 'available' || detector === 'unavailable'
-      state = translator === 'available' && !isDetectorReady ? 'downloadable' : translator
-    } else {
-      state = await languageModelAvailability(target)
-    }
-  } catch {
-    state = 'unavailable'
-  }
-  if (settings.provider !== provider) return
-  if (state === 'available') setConn('ok', '已就绪')
-  else if (state === 'unavailable') setConn('error', '不可用')
-  else setConn('warn', state === 'downloading' ? '下载中' : '需下载')
-}
-
-function applyProvider(): void {
-  const { provider } = settings
-  const ui = PROVIDER_UI[provider]
-  $('openai-group').hidden = provider !== 'openai'
-  $('google-group').hidden = provider !== 'google'
-  $('base-url-field').hidden = provider !== 'openai'
-  const note = $('chrome-note')
-  note.hidden = !ui.note
-  note.textContent = ui.note ?? ''
-  $('test-btn').textContent = ui.test
-  const link = $<HTMLAnchorElement>('help-link')
-  link.textContent = ui.help[0]
-  link.href = ui.help[1]
-  setTestResult('')
-  if (isChromeAiProvider(provider)) void renderChromeStatus()
-  else if (provider === 'cloud') void checkAccount()
-  else renderKeyConn()
-}
-
-/**
- * Chrome only downloads on-device models from a user gesture, which the offscreen document never
- * has: this button creates (and so downloads) every model page translation will need. All
- * create() calls start right away, while the click still counts as user activation.
- */
-async function prepareChromeModels(): Promise<void> {
-  const target = chromeAiLanguage(settings.targetLang)
-  const progress = new Map<string, number>()
-  const track = (label: string) => (loaded: number) => {
-    progress.set(label, loaded)
-    const pct = Math.round(([...progress.values()].reduce((a, b) => a + b, 0) / progress.size) * 100)
-    setTestResult(`正在下载模型 ${pct}%（请保持面板打开）`)
-  }
-
-  if (settings.provider === 'chrome-nano') {
-    if (!hasLanguageModel()) throw new ChromeAiError('unavailable', '当前浏览器不支持 Gemini Nano，需要桌面版 Chrome 138 及以上')
-    const session = await createLanguageModel(batchSystemPrompt(getLanguage(settings.targetLang).prompt, ''), target, track('nano'))
-    session.destroy()
-    setTestResult(isNanoOutputSupported(target) ? 'Gemini Nano 已就绪' : 'Gemini Nano 已就绪（官方暂不支持该目标语言，译文质量可能不稳定）', 'ok')
-    return
-  }
-
-  if (!hasTranslator()) throw new ChromeAiError('unavailable', '当前浏览器不支持内置翻译，需要桌面版 Chrome 138 及以上')
-  const pageLang = tabId === null ? null : normalizeDetected(await chrome.tabs.detectLanguage(tabId).catch(() => 'und'))
-  const sources = [...new Set([pageLang, target === 'en' ? 'zh' : 'en'])].filter((lang): lang is string => !!lang && lang !== target)
-  const [detector, ...translators] = await Promise.all([
-    createDetector(track('detector')).catch((err: unknown) => {
-      if (err instanceof ChromeAiError && err.code === 'unavailable') return null
-      throw err
-    }),
-    ...sources.map((source) => createTranslator({ sourceLanguage: source, targetLanguage: target }, track(source))),
-  ])
-  detector?.destroy()
-  translators.forEach((translator) => translator.destroy())
-  setTestResult(`本地模型已就绪：${sources.map((source) => `${source} → ${target}`).join('、')}`, 'ok')
-}
-
-const DOWNLOAD_STALL_MS = 20_000
-
-async function testChromeModels(): Promise<void> {
-  const checking = '正在检查本地模型…'
-  setTestResult(checking)
-  // Chrome reports no progress while it queues the download: say where to look instead of spinning silently.
-  const internals = settings.provider === 'chrome-nano' ? 'chrome://on-device-internals' : 'chrome://on-device-translation-internals'
-  const stall = setTimeout(() => {
-    if ($('test-result').textContent === checking) setTestResult(`Chrome 仍在准备下载模型，可在 ${internals} 查看进度`)
-  }, DOWNLOAD_STALL_MS)
-  try {
-    await prepareChromeModels()
-    setConn('ok', '已就绪')
-  } catch (err) {
-    const needsGesture = err instanceof ChromeAiError && err.code === 'model-download'
-    setTestResult(needsGesture ? '模型下载未能开始，请再点一次按钮' : err instanceof Error ? err.message : '本地模型不可用', 'error')
-    setConn('error', needsGesture ? '需下载' : '不可用')
-  } finally {
-    clearTimeout(stall)
-  }
-}
-
-/** Silk AI: plan and today's quota, straight from the backend. */
+/** Plan and today's quota, straight from the backend. */
 async function checkAccount(): Promise<void> {
-  setConn('idle', '检查中')
+  setConn('idle', 'connChecking')
   const result = (await chrome.runtime.sendMessage({ type: 'silk:account' } satisfies AccountRequest).catch((err: unknown) => {
     console.error('[silk] account check failed', err)
-    return { ok: false, message: '无法连接扩展后台，请重新打开面板' }
+    return { ok: false, message: t('backgroundUnreachable') }
   })) as AccountResult
-  if (settings.provider !== 'cloud') return
   if (!result.ok) {
     setTestResult(result.message, 'error')
-    setConn('error', '连接失败')
+    setConn('error', 'connFailed')
     return
   }
-  const { plan, features, quota } = result.entitlement
-  const isEnabled = features.includes('cloud-ai')
-  const isExhausted = !!quota && quota.used >= quota.limit
-  setTestResult([PLAN_LABELS[plan], quota ? describeQuota(quota) : ''].filter(Boolean).join(' · '), isEnabled && !isExhausted ? 'ok' : 'error')
-  if (!isEnabled) setConn('warn', '需升级')
-  else if (isExhausted) setConn('warn', '额度用完')
-  else setConn('ok', '可用')
+  entitlement = result.entitlement
+  renderModels()
+  const isEnabled = canUseCloudAi(entitlement)
+  const isExhausted = !!entitlement.quota && entitlement.quota.used >= entitlement.quota.limit
+  const summary = [t(PLAN_LABELS[entitlement.plan]), entitlement.quota ? describeQuota(entitlement.quota, resolveUiLang(settings.uiLang)) : '']
+  setTestResult(summary.filter(Boolean).join(' · '), isEnabled && !isExhausted ? 'ok' : 'error')
+  if (!isEnabled) setConn('warn', 'connUpgrade')
+  else if (isExhausted) setConn('warn', 'connQuota')
+  else setConn('ok', 'connReady')
 }
 
-async function testRemote(provider: 'openai' | 'google'): Promise<void> {
-  const isGoogle = provider === 'google'
-  const baseUrl = $<HTMLInputElement>('base-url').value
-  setTestResult('正在连接…')
-  const request: TestConnectionRequest = {
-    type: 'silk:test-connection',
-    provider,
-    apiKey: $<HTMLInputElement>(isGoogle ? 'google-key' : 'api-key').value,
-    baseUrl,
-    model: currentModel(),
-  }
-  if (!(await ensureHostPermission(isGoogle ? GOOGLE_TRANSLATE_URL : baseUrl))) {
-    setTestResult('未授予该接口地址的访问权限', 'error')
-    setConn('error', '连接失败')
-    return
-  }
-  const result = (await chrome.runtime.sendMessage(request)) as TestConnectionResult
-  if (result.ok) {
-    setTestResult(`连接成功 · ${result.latencyMs} ms`, 'ok')
-    setConn('ok', '已连接')
-    if (!isGoogle) $('model-list').replaceChildren(...result.models.map((id) => new Option(id, id)))
-  } else {
-    setTestResult(result.message, 'error')
-    setConn('error', '连接失败')
-  }
-}
-
-async function testConnection(): Promise<void> {
+async function runAccountCheck(): Promise<void> {
   const button = $('test-btn')
-  const { provider } = settings
   button.classList.add('is-loading')
   try {
-    if (isChromeAiProvider(provider)) await testChromeModels()
-    else if (provider === 'cloud') await checkAccount()
-    else await testRemote(provider)
+    await checkAccount()
   } catch (err) {
-    setTestResult(err instanceof Error ? err.message : '测试失败', 'error')
+    console.error('[silk] account check failed', err)
+    setTestResult(t('checkFailed'), 'error')
   } finally {
     button.classList.remove('is-loading')
   }
 }
 
-function bindKeyInput(id: string, field: 'apiKey' | 'googleApiKey'): void {
-  const input = $<HTMLInputElement>(id)
-  input.value = settings[field]
-  input.addEventListener(
-    'input',
-    debounce(async () => {
-      await persist({ [field]: input.value })
-      renderKeyConn()
-    }, SAVE_DEBOUNCE_MS),
-  )
-}
+// ───────────── interface language ─────────────
 
-function initApiSection(): void {
-  const provider = $<HTMLSelectElement>('provider')
-  provider.replaceChildren(...PROVIDERS.map(({ id, label }) => new Option(label, id)))
-  provider.value = settings.provider
-  provider.addEventListener('change', async () => {
-    const next = provider.value as Provider
-    // Ask while the change still counts as a user gesture; without it the call relies on CORS.
-    if (next === 'google') void ensureHostPermission(GOOGLE_TRANSLATE_URL)
-    await persist({ provider: next })
-    applyProvider()
-  })
-
-  bindKeyInput('api-key', 'apiKey')
-  bindKeyInput('google-key', 'googleApiKey')
-  document.querySelectorAll<HTMLButtonElement>('.toggle-key').forEach((button) =>
-    button.addEventListener('click', () => {
-      const input = button.previousElementSibling as HTMLInputElement
-      input.type = input.type === 'password' ? 'text' : 'password'
-    }),
-  )
-  $('test-btn').addEventListener('click', () => void testConnection())
-
-  const baseUrl = $<HTMLInputElement>('base-url')
-  baseUrl.value = settings.baseUrl
-  baseUrl.addEventListener('change', async () => {
-    if (!(await ensureHostPermission(baseUrl.value))) setTestResult('未授予该接口地址的访问权限，翻译请求可能失败', 'error')
-    await persist({ baseUrl: baseUrl.value })
-    baseUrl.value = settings.baseUrl
-  })
-  const concurrency = $<HTMLInputElement>('concurrency')
-  concurrency.value = String(settings.maxConcurrency)
-  concurrency.addEventListener('change', async () => {
-    await persist({ maxConcurrency: Number(concurrency.value) })
-    concurrency.value = String(settings.maxConcurrency)
-  })
-  applyProvider()
+/** Fills every static label; called again whenever the interface language changes. */
+function applyLanguage(): void {
+  document.documentElement.lang = resolveUiLang(settings.uiLang)
+  document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => (el.textContent = t(el.dataset.i18n as MessageKey)))
+  document.querySelectorAll<HTMLElement>('[data-i18n-aria]').forEach((el) => el.setAttribute('aria-label', t(el.dataset.i18nAria as MessageKey)))
+  document.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle as MessageKey)))
+  renderModels()
+  const uiLang = $<HTMLSelectElement>('ui-lang')
+  const names: Record<UiLangSetting, string> = { auto: t('uiAuto'), 'zh-CN': '简体中文', en: 'English' }
+  uiLang.replaceChildren(...UI_LANG_SETTINGS.map((value) => new Option(names[value], value)))
+  uiLang.value = settings.uiLang
+  if (pageNote) $('page-note').textContent = t(pageNote)
+  if (pageScheme) $('host').textContent = t('pageKind', { kind: pageScheme })
+  if (pageState) renderPageState(pageState)
+  ;[modeSeg, ruleSeg, defaultModeSeg, styleSeg].forEach((seg) => seg.repaint())
 }
 
 // ───────────── boot ─────────────
 
 async function init(): Promise<void> {
   settings = await loadSettings()
+  const stored = (await chrome.storage.local.get('entitlement')).entitlement
+  entitlement = sanitizeEntitlement(stored) ?? entitlement
   $('beta-badge').hidden = RELEASE_CHANNEL !== 'beta'
 
   const lang = $<HTMLSelectElement>('lang')
   lang.replaceChildren(...LANGUAGES.map((l) => new Option(l.label, l.code)))
   lang.value = settings.targetLang
-  lang.addEventListener('change', async () => {
-    await persist({ targetLang: lang.value })
-    if (isChromeAiProvider(settings.provider)) void renderChromeStatus()
-  })
+  lang.addEventListener('change', () => void persist({ targetLang: lang.value }))
 
   defaultModeSeg.setValue(settings.defaultMode)
   styleSeg.setValue(settings.bilingualStyle)
@@ -511,15 +330,30 @@ async function init(): Promise<void> {
   selection.checked = settings.selectionEnabled
   selection.addEventListener('change', () => void persist({ selectionEnabled: selection.checked }))
 
+  const concurrency = $<HTMLInputElement>('concurrency')
+  concurrency.value = String(settings.maxConcurrency)
+  concurrency.addEventListener('change', async () => {
+    await persist({ maxConcurrency: Number(concurrency.value) })
+    concurrency.value = String(settings.maxConcurrency)
+  })
+
+  initModelPicker()
+  applyLanguage()
+  $('ui-lang').addEventListener('change', async (e) => {
+    await persist({ uiLang: (e.target as HTMLSelectElement).value as UiLangSetting })
+    applyLanguage()
+    renderShortcut(settings.shortcut)
+    void runAccountCheck()
+  })
   renderShortcut(settings.shortcut)
   initShortcutRecorder()
-  initModelPicker()
-  initApiSection()
+  $('test-btn').addEventListener('click', () => void runAccountCheck())
+  void runAccountCheck()
   await initPage()
 }
 
 addEventListener('unload', () => clearInterval(pollTimer))
 init().catch((err) => {
   console.error('[silk] popup failed', err)
-  setTestResult('面板加载失败，请重新打开', 'error')
+  setTestResult(t('popupFailed'), 'error')
 })

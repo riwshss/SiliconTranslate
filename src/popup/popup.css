@@ -122,7 +122,7 @@ h2 { margin: 0 0 2px; font-size: 12px; font-weight: 650; color: var(--muted); le
 .primary:active, .secondary:active { transform: scale(0.98); }
 .primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .primary svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.secondary { height: 32px; padding: 0 14px; background: var(--field); border: 1px solid var(--line); }
+.secondary { flex: none; height: 32px; padding: 0 14px; background: var(--field); border: 1px solid var(--line); white-space: nowrap; }
 .secondary:hover { background: var(--hover); }
 .secondary.is-loading { opacity: 0.6; pointer-events: none; }
 
@@ -162,11 +162,8 @@ h2 { margin: 0 0 2px; font-size: 12px; font-weight: 650; color: var(--muted); le
 
 .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; }
 .field > span:first-child { color: var(--ink); }
-.stack { display: grid; gap: 6px; }
-.group { display: grid; gap: 10px; }
-.stack > span { font-size: 12px; color: var(--muted); }
 
-select, .text, .num, .input-wrap input {
+select, .num {
   height: 32px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -177,30 +174,35 @@ select, .text, .num, .input-wrap input {
 }
 select { cursor: pointer; padding-right: 6px; }
 .field select { min-width: 150px; }
-.text { width: 100%; }
 .num { width: 72px; text-align: center; }
-select:focus, .text:focus, .num:focus, .input-wrap input:focus {
+select:focus, .num:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.input-wrap { position: relative; }
-.input-wrap input { width: 100%; padding-right: 38px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
-.ghost-icon {
-  position: absolute;
-  right: 4px;
-  top: 4px;
-  width: 26px;
-  height: 24px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--faint);
+/* Model picker: one radio card per Silk AI model. */
+.models { display: grid; gap: 6px; }
+.model {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--field);
   cursor: pointer;
-  display: grid;
-  place-items: center;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
-.ghost-icon:hover { background: var(--hover); color: var(--ink); }
-.ghost-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
+.model:hover { background: var(--hover); }
+.model:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.model[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.model-name { font-weight: 600; }
+.model[aria-checked="true"] .model-name { color: var(--accent); }
+.model-note { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.model.is-locked { cursor: not-allowed; opacity: 0.55; }
+.model.is-locked:hover { background: var(--field); }
+.models-hint { margin: 0; color: var(--warn); }
 
 .switch { position: relative; width: 36px; height: 21px; flex: none; }
 .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }

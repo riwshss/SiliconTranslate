@@ -1,4 +1,5 @@
 import { toApiError } from '../core/errors'
+import { resolveUiLang, translator, type UiLang } from '../shared/i18n'
 import {
   PORT_BATCH,
   PORT_STREAM,
@@ -8,13 +9,9 @@ import {
   type BatchRequest,
   type StreamEvent,
   type StreamRequest,
-  type TestConnectionRequest,
-  type TestConnectionResult,
 } from '../shared/messages'
-import { isChromeAiProvider, loadSettings, onSettingsChanged, sanitizeSettings } from '../shared/settings'
+import { dropLegacySettings, loadSettings, onSettingsChanged } from '../shared/settings'
 import { refreshEntitlement } from './account'
-import { listChatModels, pingModel } from './api'
-import { googleTranslate } from './google'
 import { pickSelectionLanguage, setConcurrency, streamTextTranslation, translateBatch } from './translator'
 
 const MAX_BATCH_ITEMS = 50
@@ -24,11 +21,21 @@ const MAX_SELECTION_CHARS = 5000
 loadSettings()
   .then((s) => setConcurrency(s.maxConcurrency))
   .catch((err) => console.error('[silk] failed to load settings', err))
-onSettingsChanged((next, prev) => {
-  setConcurrency(next.maxConcurrency)
-  // Release on-device models (memory, GPU) once a cloud engine is selected.
-  if (isChromeAiProvider(prev.provider) && !isChromeAiProvider(next.provider)) chrome.offscreen?.closeDocument().catch(() => undefined)
+onSettingsChanged((next) => setConcurrency(next.maxConcurrency))
+
+chrome.runtime.onInstalled.addListener(() => {
+  dropLegacySettings().catch((err) => console.error('[silk] failed to migrate settings', err))
 })
+
+async function uiLang(): Promise<UiLang> {
+  const settings = await loadSettings().catch(() => null)
+  return resolveUiLang(settings?.uiLang ?? 'auto')
+}
+
+/** The backend refused a model the cached plan allowed: the plan changed, so fetch it again. */
+function refreshPlanAfter(code: string | undefined): void {
+  if (code === 'model-locked') refreshEntitlement().catch((err) => console.error('[silk] failed to refresh plan', err))
+}
 
 function safePost(port: chrome.runtime.Port, message: BatchEvent | StreamEvent): void {
   try {
@@ -66,9 +73,10 @@ function handleBatchPort(port: chrome.runtime.Port): void {
   const signal = withAbortOnDisconnect(port)
   port.onMessage.addListener(async (message: unknown) => {
     if (!isBatchRequest(message)) {
-      safePost(port, { type: 'end', failed: [], error: { code: 'bad-request', message: '无效的翻译请求' } })
+      safePost(port, { type: 'end', failed: [], error: { code: 'bad-request', message: translator(await uiLang())('invalidBatch') } })
       return
     }
+    const lang = await uiLang()
     try {
       const settings = await loadSettings()
       const outcome = await translateBatch(
@@ -78,10 +86,13 @@ function handleBatchPort(port: chrome.runtime.Port): void {
         (index, text) => safePost(port, { type: 'item', index, text }),
         signal,
       )
-      safePost(port, { type: 'end', failed: outcome.failed, error: outcome.error?.toWire() })
+      refreshPlanAfter(outcome.error?.code)
+      safePost(port, { type: 'end', failed: outcome.failed, error: outcome.error?.toWire(lang) })
     } catch (err) {
       const failed = message.texts.map((_, i) => i)
-      safePost(port, { type: 'end', failed, error: toApiError(err).toWire() })
+      const error = toApiError(err)
+      refreshPlanAfter(error.code)
+      safePost(port, { type: 'end', failed, error: error.toWire(lang) })
     }
   })
 }
@@ -90,9 +101,10 @@ function handleStreamPort(port: chrome.runtime.Port): void {
   const signal = withAbortOnDisconnect(port)
   port.onMessage.addListener(async (message: unknown) => {
     if (!isStreamRequest(message)) {
-      safePost(port, { type: 'end', error: { code: 'bad-request', message: '选中的文本为空或过长' } })
+      safePost(port, { type: 'end', error: { code: 'bad-request', message: translator(await uiLang())('invalidSelection') } })
       return
     }
+    const lang = await uiLang()
     try {
       const settings = await loadSettings()
       const language = pickSelectionLanguage(settings, message.text)
@@ -100,7 +112,9 @@ function handleStreamPort(port: chrome.runtime.Port): void {
       await streamTextTranslation(settings, message.text, language, (text) => safePost(port, { type: 'delta', text }), signal)
       safePost(port, { type: 'end' })
     } catch (err) {
-      safePost(port, { type: 'end', error: toApiError(err).toWire() })
+      const error = toApiError(err)
+      refreshPlanAfter(error.code)
+      safePost(port, { type: 'end', error: error.toWire(lang) })
     }
   })
 }
@@ -111,27 +125,6 @@ chrome.runtime.onConnect.addListener((port) => {
   else if (port.name === PORT_STREAM) handleStreamPort(port)
 })
 
-const TIMEOUT_MESSAGE = '连接超时（20 秒），请检查网络或代理'
-
-async function testConnection(req: TestConnectionRequest): Promise<TestConnectionResult> {
-  // Validate with the same rules as stored settings (popup input is untrusted too).
-  const settings = sanitizeSettings({ apiKey: req.apiKey, baseUrl: req.baseUrl, model: req.model, googleApiKey: req.apiKey })
-  const isGoogle = req.provider === 'google'
-  if (!(isGoogle ? settings.googleApiKey : settings.apiKey)) return { ok: false, message: '请先填写 API Key' }
-  const cfg = { apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model }
-  const started = performance.now()
-  try {
-    if (isGoogle) await googleTranslate(settings.googleApiKey, ['Hello'], 'zh-CN', 'text', AbortSignal.timeout(20_000))
-    else await pingModel(cfg, AbortSignal.timeout(20_000))
-    const latencyMs = Math.round(performance.now() - started)
-    const models = isGoogle ? [] : await listChatModels(cfg).catch(() => [])
-    return { ok: true, latencyMs, models }
-  } catch (err) {
-    const error = toApiError(err)
-    return { ok: false, message: error.code === 'aborted' ? TIMEOUT_MESSAGE : error.message }
-  }
-}
-
 async function account(): Promise<AccountResult> {
   const started = performance.now()
   try {
@@ -139,15 +132,14 @@ async function account(): Promise<AccountResult> {
     return { ok: true, latencyMs: Math.round(performance.now() - started), entitlement }
   } catch (err) {
     const error = toApiError(err)
-    return { ok: false, message: error.code === 'aborted' ? TIMEOUT_MESSAGE : error.message }
+    const lang = await uiLang()
+    return { ok: false, message: error.code === 'aborted' ? translator(lang)('timeout') : error.text(lang) }
   }
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false
-  const req = message as TestConnectionRequest | AccountRequest
-  if (req?.type === 'silk:test-connection') testConnection(req).then(sendResponse)
-  else if (req?.type === 'silk:account') account().then(sendResponse)
-  else return false
+  if ((message as AccountRequest)?.type !== 'silk:account') return false
+  account().then(sendResponse)
   return true
 })

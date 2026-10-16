@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../src/core/errors'
 import { streamChat, type ApiConfig } from '../src/background/api'
 
-const cloud: ApiConfig = { apiKey: '', baseUrl: 'https://api.example.com/v1', model: 'silk-cloud', headers: { 'X-Silk-Install': 'id-1' } }
+const cloud: ApiConfig = { baseUrl: 'https://api.example.com/v1', model: 'anthropic/claude-haiku-5.5', headers: { 'X-Silk-Install': 'id-1' } }
 
 function sse(...pieces: string[]): Response {
   const body = pieces.map((p) => `data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}\n\n`).join('') + 'data: [DONE]\n\n'
@@ -18,20 +18,13 @@ async function collect(cfg: ApiConfig): Promise<string> {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('streamChat against the Silk backend', () => {
-  it('sends custom headers and no Authorization header when there is no API key', async () => {
+  it('sends the install id and chosen model, and never an Authorization header', async () => {
     const fetchMock = vi.fn(async () => sse('你', '好'))
     vi.stubGlobal('fetch', fetchMock)
     expect(await collect(cloud)).toBe('你好')
     const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1]
     expect(init.headers).toEqual({ 'Content-Type': 'application/json', 'X-Silk-Install': 'id-1' })
-  })
-
-  it('still sends a Bearer token for user-configured endpoints', async () => {
-    const fetchMock = vi.fn(async () => sse('ok'))
-    vi.stubGlobal('fetch', fetchMock)
-    await collect({ apiKey: 'sk-1', baseUrl: 'https://x.test/v1', model: 'm' })
-    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1]
-    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-1')
+    expect(JSON.parse(init.body as string)).toMatchObject({ model: 'anthropic/claude-haiku-5.5', stream: true })
   })
 
   it('maps a used-up quota to a final "quota" error without retrying', async () => {
