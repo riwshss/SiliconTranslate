@@ -278,11 +278,16 @@ export async function resolvePlan(id: string, env: Env, deps: Deps): Promise<Pla
   return isPlan(env.DEFAULT_PLAN) ? env.DEFAULT_PLAN : 'free'
 }
 
+// "v2": since 2.3 usage is source characters, not whole prompts; what the 2.2 backend counted under
+// the plain `install:` / `ip:` keys (against 20x higher limits) must not carry over.
+const installCounter = (id: string) => `v2:install:${id}`
+const ipCounter = (request: Request) => `v2:ip:${clientIp(request)}`
+
 /** Counters spent synchronously on every request; separate Durable Objects, called in parallel. */
 function requestCounters(who: Identity, request: Request, env: Env): Array<[string, number]> {
   const counters: Array<[string, number]> = [
-    [`install:${who.id}`, limitOf(env.INSTALL_DAILY_CHARS, 100_000)],
-    [`ip:${clientIp(request)}`, limitOf(env.IP_DAILY_CHARS, 300_000)],
+    [installCounter(who.id), limitOf(env.INSTALL_DAILY_CHARS, 100_000)],
+    [ipCounter(request), limitOf(env.IP_DAILY_CHARS, 300_000)],
   ]
   if (who.isLegacy) counters.push(legacyCounter(env))
   return counters
@@ -299,8 +304,11 @@ function legacyCounter(env: Env): [string, number] {
  */
 async function spend(deps: Deps, amount: number, counters: ReadonlyArray<[string, number]>): Promise<QuotaResult | null> {
   const results = await Promise.all(counters.map(([key, limit]) => deps.quota.consume(key, amount, limit)))
-  const exhausted = results.find((result) => !result.allowed)
-  if (!exhausted) return null
+  const index = results.findIndex((result) => !result.allowed)
+  if (index < 0) return null
+  const exhausted = results[index]
+  // Counter kind only ("v2:ip", "legacy"): no install id or IP in the logs.
+  console.warn('quota exceeded', counters[index][0].split(':').slice(0, 2).join(':'), exhausted.used, exhausted.limit, amount)
   await refund(deps, amount, counters.filter((_, i) => results[i].allowed))
   return exhausted
 }
@@ -346,7 +354,7 @@ async function handleEntitlement(request: Request, env: Env, deps: Deps): Promis
   const who = await identify(request, env)
   if (!who) return fail(401, 'unauthorized', 'Missing or invalid install token')
   const plan = await resolvePlan(who.id, env, deps)
-  const quota = UNLIMITED_PLANS.has(plan) ? null : quotaMeta(await deps.quota.peek(`install:${who.id}`, limitOf(env.INSTALL_DAILY_CHARS, 100_000)))
+  const quota = UNLIMITED_PLANS.has(plan) ? null : quotaMeta(await deps.quota.peek(installCounter(who.id), limitOf(env.INSTALL_DAILY_CHARS, 100_000)))
   return ok({ plan, features: PLAN_FEATURES[plan], models: PLAN_MODELS[plan], quota })
 }
 

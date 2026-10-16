@@ -330,6 +330,17 @@ describe('/v1/translate', () => {
     expect(await used(deps)).toBe(0)
   })
 
+  it('ignores what the 2.2 backend counted today under its old keys (whole prompts, higher limits)', async () => {
+    const { deps, quota, settle } = setup()
+    const today = new Date().toISOString().slice(0, 10)
+    quota.states.set('ip:1.2.3.4', { day: today, used: 5_000_000 })
+    quota.states.set(`install:${INSTALL}`, { day: today, used: 1_500_000 })
+    const res = await handleRequest(translateReq(['hello']), env, deps)
+    expect(res.status).toBe(200)
+    await eventsOf(res, settle)
+    expect(await used(deps)).toBe(5)
+  })
+
   it('counts the global limit in 16 shards after the response, then refuses for the rest of the day', async () => {
     const { deps, settle, quota, fetchMock } = setup()
     const tightGlobal = { ...env, GLOBAL_DAILY_CHARS: '160' } // 10 per shard
@@ -435,8 +446,8 @@ describe('developer plan', () => {
       await eventsOf(res, settle)
     }
     expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(init?.body as string).model)).toEqual(MODELS)
-    expect(quota.states.get(`install:${INSTALL}`)).toBeUndefined()
-    expect(quota.states.get('ip:1.2.3.4')).toBeUndefined()
+    expect(quota.states.get(`v2:install:${INSTALL}`)).toBeUndefined()
+    expect(quota.states.get('v2:ip:1.2.3.4')).toBeUndefined()
     expect(points.every((p) => p.blobs?.[4] === 'dev')).toBe(true)
 
     // A full global wallet stops everyone else, but not the developer.
