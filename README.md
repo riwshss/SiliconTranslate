@@ -79,7 +79,7 @@ Cloudflare Worker，作用是**把 OpenRouter 的 Key 留在服务器上**（写
 - 同一个模型在 OpenRouter 上由多家服务商提供，速度差很多（DeepSeek V4 Flash 约 5–80 token/秒）。后端请求时带上 `provider.preferred_min_throughput`（`MIN_PROVIDER_THROUGHPUT`，默认 50）：达不到这个速度的服务商排到后面，只在其他都不可用时才用，所以总是先用「够快的里面最便宜的」。
 - DeepSeek V4 Flash 支持推理模式，后端请求时带 `reasoning: { effort: "none" }` 关闭思考，避免多花输出 token（`MODEL_OPTIONS`）。
 - 系统提示词是常量，目标语言和页面标题放在 user 消息里，服务商的前缀缓存可以跨语言、跨页面、跨用户命中。
-- **性能指标：** 每个 `/v1/translate` 请求往 Workers Analytics Engine（绑定 `METRICS`，数据集 `silk_translate_requests`）写一个数据点：`blobs = [模型, 服务商, 错误码, kind]`，`doubles = [原文字数, 首个 token 耗时 ms, 总耗时 ms, 命中提示词缓存的 token 数, 共享缓存命中段数]`。服务商和缓存 token 数取自 OpenRouter 流的 `provider` 字段和最后一个 chunk 的 `usage.prompt_tokens_details.cached_tokens`（OpenRouter 现在默认在每个响应里返回 usage，不需要再传参数）。
+- **性能指标：** 每个 `/v1/translate` 请求往 Workers Analytics Engine（绑定 `METRICS`，数据集 `silk_translate_requests`）写一个数据点：`blobs = [模型, 服务商, 错误码, kind]`，`doubles = [原文字数, 首个 token 耗时 ms, 总耗时 ms, 命中提示词缓存的 token 数, 共享缓存命中段数]`。服务商和缓存 token 数取自 OpenRouter 流的 `provider` 字段和最后一个 chunk 的 `usage.prompt_tokens_details.cached_tokens`（OpenRouter 现在默认在每个响应里返回 usage，不需要再传参数）。绑定目前在 `server/wrangler.toml` 里注释掉了（账号的 Analytics Engine 未生效时部署会报 10089），取消注释后重新部署即可开启；没有绑定时不记录指标，其余功能不受影响。
 - 额度按字数计，不区分模型；正式版开放贵的模型时，建议按模型设不同额度（GPT-6 Sol 的价格约是 DeepSeek V4 Flash 的 30–50 倍）。
 - OpenRouter 出错时会退还本次扣的额度，客户端的自动重试不会白扣额度。
 - 接口：`POST /v1/install`（签发安装令牌）、`GET /v1/entitlement`（套餐与今日额度）、`POST /v1/translate`（翻译，流式）。JSON 响应统一为 `{ success, data, error, meta }`；额度用完返回 `429` 并带 `X-Silk-Error: quota_exceeded`。
