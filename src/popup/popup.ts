@@ -15,6 +15,7 @@ import {
   type TranslateMode,
 } from '../shared/settings'
 import { eventToShortcut, isValidShortcut } from '../shared/shortcut'
+import { ALL_SITES, hasAllSites, sitePattern } from '../shared/site-access'
 import { segmented } from './segmented'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -22,6 +23,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 let settings: Settings
 let tabId: number | null = null
 let host = ''
+let pageUrl: URL | null = null
 /** Last page state, note and non-web scheme, kept so a language switch can re-render them. */
 let pageState: PageState | null = null
 let pageNote: MessageKey | null = null
@@ -107,6 +109,7 @@ async function initPage(): Promise<void> {
   }
   tabId = tab.id
   host = url.hostname
+  pageUrl = url
   $('host').textContent = host
   ruleSeg.setValue(settings.domainRules[host] ?? '')
   try {
@@ -119,6 +122,11 @@ async function initPage(): Promise<void> {
 
 const ruleSeg = segmented($('rule-seg'), (value) => {
   if (!host) return
+  // Ask for this one site while the click still counts as a user gesture, so the page is translated
+  // on load next time. Declining keeps the rule: it then applies once the popup injects the script.
+  if (value === 'always' && pageUrl) {
+    chrome.permissions.request({ origins: [sitePattern(pageUrl)] }).catch((err) => console.error('[silk] site access request failed', err))
+  }
   void persist(withDomainRule(settings, host, (value || null) as DomainRule | null))
 })
 
@@ -170,6 +178,23 @@ function initShortcutRecorder(): void {
     button.classList.remove('is-invalid')
     void persist({ shortcut }).then(stop)
   })
+}
+
+/**
+ * "Run on all sites" mirrors the optional all-sites grant. The prompt can close the popup, so the
+ * service worker (permissions.onAdded) registers the content script, not this page.
+ */
+async function initSiteAccess(): Promise<void> {
+  const allSites = $<HTMLInputElement>('all-sites')
+  const render = async () => (allSites.checked = await hasAllSites())
+  await render()
+  allSites.addEventListener('change', () => {
+    const origins = [...ALL_SITES]
+    const change = allSites.checked ? chrome.permissions.request({ origins }) : chrome.permissions.remove({ origins })
+    change.catch((err) => console.error('[silk] site access change failed', err)).finally(() => void render())
+  })
+  chrome.permissions.onAdded.addListener(() => void render())
+  chrome.permissions.onRemoved.addListener(() => void render())
 }
 
 // ───────────── Silk AI ─────────────
@@ -329,6 +354,7 @@ async function init(): Promise<void> {
   const selection = $<HTMLInputElement>('selection')
   selection.checked = settings.selectionEnabled
   selection.addEventListener('change', () => void persist({ selectionEnabled: selection.checked }))
+  await initSiteAccess()
 
   initModelPicker()
   applyLanguage()

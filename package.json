@@ -1,6 +1,6 @@
 {
   "name": "silk-translate",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "private": true,
   "type": "module",
   "description": "丝译 Silk Translate — Silk AI 云端网页翻译扩展（Claude Haiku 5.5 / GPT-6 Sol / Gemini 3.8 Flash），中英文界面",

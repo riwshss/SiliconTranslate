@@ -52,6 +52,13 @@ try {
     chrome.storage.local.set({ settings: { provider: 'openai', apiKey: 'sk-test', model: 'google/gemini-3.8-flash', uiLang: 'zh-CN' } }),
   )
 
+  // Site access is an optional permission the store build never holds at install, and the prompt
+  // can't be clicked headless. The mock page shares the backend origin (a granted host permission),
+  // so register the content script there the way a granted site would.
+  await worker.evaluate(() =>
+    chrome.scripting.registerContentScripts([{ id: 'e2e-content', matches: ['http://127.0.0.1/*'], js: ['content.js'], runAt: 'document_idle' }]),
+  )
+
   const page = await context.newPage()
   await page.goto(`${origin}/page`)
   await page.waitForFunction(() => document.querySelector('silk-ui'))

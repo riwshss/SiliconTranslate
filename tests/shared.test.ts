@@ -3,6 +3,7 @@ import { resolveUiLang, translator } from '../src/shared/i18n'
 import { CLOUD_MODELS, DEFAULT_SETTINGS, dropLegacySettings, engineId, MAX_CONCURRENCY, sanitizeSettings, withDomainRule } from '../src/shared/settings'
 import { eventToShortcut, isValidShortcut, matchesShortcut } from '../src/shared/shortcut'
 import { getLanguage } from '../src/shared/languages'
+import { contentScriptMatches, sitePattern } from '../src/shared/site-access'
 
 const key = (code: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}) => ({
   code,
@@ -143,5 +144,17 @@ describe('i18n', () => {
   it('fills placeholders', () => {
     expect(translator('en')('pageTranslating', { done: 3, total: 9 })).toBe('Translating 3/9')
     expect(translator('zh-CN')('pageFailed', { n: 2 })).toBe('2 段失败')
+  })
+})
+
+describe('site access', () => {
+  it('builds a per-host pattern without the port', () => {
+    expect(sitePattern(new URL('https://example.com:8443/a?b'))).toBe('https://example.com/*')
+  })
+
+  it('runs the content script on granted web origins but never on the backend', () => {
+    const origins = ['https://*/*', 'http://*/*', 'https://news.example/*', 'https://api.silk.dev/*', 'chrome://favicon/*']
+    expect(contentScriptMatches(origins, 'https://api.silk.dev')).toEqual(['https://*/*', 'http://*/*', 'https://news.example/*'])
+    expect(contentScriptMatches(['https://api.silk.dev/*'], 'https://api.silk.dev')).toEqual([])
   })
 })

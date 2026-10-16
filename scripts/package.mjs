@@ -90,7 +90,8 @@ function assertManifest(version) {
   const required = [
     manifest.background.service_worker,
     manifest.action.default_popup,
-    ...manifest.content_scripts.flatMap((c) => c.js),
+    // Registered at runtime for the sites the user grants (see background), not in the manifest.
+    'content.js',
   ]
   const missing = required.filter((file) => !statSync(join(DIST, file), { throwIfNoEntry: false }))
   if (missing.length) throw new Error(`dist/ is missing: ${missing.join(', ')}`)

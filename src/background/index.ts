@@ -10,7 +10,9 @@ import {
   type StreamEvent,
   type StreamRequest,
 } from '../shared/messages'
+import { CLOUD_API_URL } from '../shared/service'
 import { dropLegacySettings, loadSettings } from '../shared/settings'
+import { contentScriptMatches } from '../shared/site-access'
 import { refreshEntitlement } from './account'
 import { pickSelectionLanguage, streamTextTranslation, translateBatch } from './translator'
 
@@ -18,9 +20,34 @@ const MAX_BATCH_ITEMS = 50
 const MAX_ITEM_CHARS = 8000
 const MAX_SELECTION_CHARS = 5000
 
+const CONTENT_SCRIPT_ID = 'silk-content'
+
+/** Re-registers the content script for the origins granted right now (none → not registered). */
+async function registerContentScript(): Promise<void> {
+  const { origins = [] } = await chrome.permissions.getAll()
+  const matches = contentScriptMatches(origins, CLOUD_API_URL)
+  const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [CONTENT_SCRIPT_ID] })
+  if (registered.length) await chrome.scripting.unregisterContentScripts({ ids: [CONTENT_SCRIPT_ID] })
+  if (!matches.length) return
+  await chrome.scripting.registerContentScripts([
+    { id: CONTENT_SCRIPT_ID, matches, js: ['content.js'], runAt: 'document_idle', persistAcrossSessions: true },
+  ])
+}
+
+/** Serialized: install and permission events can fire together and would race on the same id. */
+let syncing: Promise<void> = Promise.resolve()
+function syncContentScript(): void {
+  syncing = syncing
+    .then(registerContentScript)
+    .catch((err) => console.error('[silk] failed to register content script', err))
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   dropLegacySettings().catch((err) => console.error('[silk] failed to migrate settings', err))
+  syncContentScript()
 })
+chrome.permissions.onAdded.addListener(syncContentScript)
+chrome.permissions.onRemoved.addListener(syncContentScript)
 
 async function uiLang(): Promise<UiLang> {
   const settings = await loadSettings().catch(() => null)
