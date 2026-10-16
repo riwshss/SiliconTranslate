@@ -23,6 +23,9 @@ export interface Entitlement {
   readonly quota: Quota | null
 }
 
+/** chrome.storage.local key of the last entitlement the backend reported. */
+export const ENTITLEMENT_KEY = 'entitlement'
+
 const PLANS: readonly Plan[] = ['beta', 'free', 'pro']
 const FEATURES: readonly Feature[] = ['cloud-ai']
 const MODEL_IDS = CLOUD_MODELS.map((m) => m.id)

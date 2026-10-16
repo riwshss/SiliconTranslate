@@ -1,19 +1,24 @@
 import { ApiError } from '../core/errors'
 import { createSseParser } from '../core/sse'
-import type { ChatMessage } from '../core/prompt'
+import type { ErrorCode } from '../shared/messages'
 
 export interface ApiConfig {
   readonly baseUrl: string
   readonly model: string
-  /** Extra request headers, e.g. the anonymous install id for the Silk backend. */
+  /** Extra request headers, e.g. the signed install token for the Silk backend. */
   readonly headers?: Readonly<Record<string, string>>
 }
 
-interface ChatOptions {
-  readonly signal?: AbortSignal
-  readonly maxTokens?: number
-  readonly temperature?: number
+/** Body of POST /v1/translate: data only; the backend writes the prompt. */
+export interface TranslateBody {
+  readonly target: string
+  readonly title?: string
+  readonly kind: 'page' | 'selection'
+  readonly texts: readonly string[]
 }
+
+/** A finished page paragraph (by its index in `texts`) or a piece of a selection translation. */
+export type TranslateEvent = { readonly index: number; readonly text: string } | { readonly delta: string }
 
 const MAX_RETRIES = 3
 /** Rate limits (per-minute quotas) clear slowly: wait longer and more often than for 5xx. */
@@ -21,17 +26,6 @@ const MAX_RATE_LIMIT_RETRIES = 5
 const BASE_DELAY_MS = 800
 const RATE_LIMIT_BASE_DELAY_MS = 2_000
 const MAX_DELAY_MS = 20_000
-const DEFAULT_MAX_TOKENS = 4096
-
-function chatBody(cfg: ApiConfig, messages: ChatMessage[], stream: boolean, opts: ChatOptions) {
-  return {
-    model: cfg.model,
-    messages,
-    stream,
-    temperature: opts.temperature ?? 0.2,
-    max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-  }
-}
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -65,11 +59,32 @@ export function onRateLimited(listener: () => void): void {
 /** Header the Silk backend sets on its own errors, so they are classified without reading the body. */
 const SILK_ERROR_HEADER = 'x-silk-error'
 
+/**
+ * Backend errors that are a final answer. Its upstream_error (502) and server_error (500) also
+ * carry the header but are transient, so they go through the normal 5xx retries.
+ */
+const FINAL_SILK_ERRORS = new Set(['quota_exceeded', 'upgrade_required', 'model_locked', 'unauthorized', 'bad_request', 'gone'])
+
+const SILK_ERROR_CODES: Readonly<Record<string, ErrorCode>> = {
+  quota_exceeded: 'quota',
+  upgrade_required: 'upgrade',
+  model_locked: 'model-locked',
+  unauthorized: 'auth',
+  bad_request: 'bad-request',
+  gone: 'bad-request',
+  upstream_error: 'server',
+  server_error: 'server',
+}
+
+/** A backend error code (header or stream event) as the extension's error. */
+export function errorFromSilkCode(code: string, detail = ''): ApiError {
+  return new ApiError(SILK_ERROR_CODES[code] ?? 'server', detail)
+}
+
 async function errorFromResponse(res: Response): Promise<ApiError> {
   const silkError = res.headers.get(SILK_ERROR_HEADER)
-  if (silkError === 'quota_exceeded') return new ApiError('quota')
-  if (silkError === 'upgrade_required' || res.status === 402) return new ApiError('upgrade')
-  if (silkError === 'model_locked') return new ApiError('model-locked')
+  if (res.status === 402) return new ApiError('upgrade')
+  if (silkError === 'quota_exceeded' || silkError === 'upgrade_required' || silkError === 'model_locked') return errorFromSilkCode(silkError)
   const raw = await res.text().catch(() => '')
   let detail = raw.slice(0, 200)
   try {
@@ -99,7 +114,7 @@ export async function fetchWithRetry(url: string, init: RequestInit, signal?: Ab
     }
     if (res.ok) return res
     // A spent quota or missing plan is a final answer, not a transient 429.
-    if (res.headers.has(SILK_ERROR_HEADER) || res.status === 402) throw await errorFromResponse(res)
+    if (FINAL_SILK_ERRORS.has(res.headers.get(SILK_ERROR_HEADER) ?? '') || res.status === 402) throw await errorFromResponse(res)
     const isRateLimited = res.status === 429
     if (isRateLimited) rateLimitListener?.()
     const isRetryable = isRateLimited || res.status >= 500
@@ -109,71 +124,64 @@ export async function fetchWithRetry(url: string, init: RequestInit, signal?: Ab
   }
 }
 
-function headers(cfg: ApiConfig): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    ...cfg.headers,
-  }
+interface EventPayload {
+  index?: unknown
+  text?: unknown
+  delta?: unknown
+  error?: { code?: string; message?: string }
 }
 
-interface ChunkPayload {
-  error?: { message?: string } | string
-  choices?: Array<{ delta?: { content?: string | null }; message?: { content?: string | null } }>
-}
-
-function parsePayload(data: string): ChunkPayload {
+function parseEvent(data: string): EventPayload {
   try {
-    return JSON.parse(data) as ChunkPayload
+    return JSON.parse(data) as EventPayload
   } catch {
     throw new ApiError('bad-response', data.slice(0, 120))
   }
 }
 
-/** Streams `delta.content` pieces of an OpenAI-compatible chat completion (SSE). */
-export async function* streamChat(cfg: ApiConfig, messages: ChatMessage[], opts: ChatOptions = {}): AsyncGenerator<string> {
+/**
+ * Streams the events of a Silk backend translation (POST /v1/translate, server-sent events).
+ * An `error` event (e.g. the provider failed after cached paragraphs were sent) is thrown.
+ */
+export async function* streamTranslate(cfg: ApiConfig, body: TranslateBody, signal?: AbortSignal): AsyncGenerator<TranslateEvent> {
   const res = await fetchWithRetry(
-    `${cfg.baseUrl}/chat/completions`,
-    { method: 'POST', headers: headers(cfg), body: JSON.stringify(chatBody(cfg, messages, true, opts)) },
-    opts.signal,
+    `${cfg.baseUrl}/translate`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', ...cfg.headers }, body: JSON.stringify({ model: cfg.model, ...body }) },
+    signal,
   )
-  // Some proxies ignore `stream: true` and answer with plain JSON.
-  if ((res.headers.get('content-type') ?? '').includes('application/json')) {
-    const json = parsePayload(await res.text())
-    const content = json.choices?.[0]?.message?.content
-    if (typeof content !== 'string') throw new ApiError('bad-response', 'missing content')
-    yield content
-    return
-  }
   if (!res.body) throw new ApiError('bad-response', 'emptyReply')
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
-  const pending: string[] = []
+  /** In arrival order; an error is thrown only after the events before it were handed out. */
+  const pending: Array<TranslateEvent | ApiError> = []
   let isDone = false
   const sse = createSseParser((data) => {
     if (data === '[DONE]') {
       isDone = true
       return
     }
-    const json = parsePayload(data)
-    if (json.error) {
-      const message = typeof json.error === 'string' ? json.error : json.error.message
-      throw new ApiError('server', message ?? 'stream error')
-    }
-    const piece = json.choices?.[0]?.delta?.content
-    if (piece) pending.push(piece)
+    const event = parseEvent(data)
+    if (event.error) pending.push(errorFromSilkCode(event.error.code ?? '', event.error.message ?? ''))
+    else if (typeof event.delta === 'string') pending.push({ delta: event.delta })
+    else if (Number.isInteger(event.index) && typeof event.text === 'string') pending.push({ index: event.index as number, text: event.text })
   })
+  const next = (): TranslateEvent => {
+    const item = pending.shift() as TranslateEvent | ApiError
+    if (item instanceof ApiError) throw item
+    return item
+  }
   try {
     while (!isDone) {
       const { value, done } = await reader.read()
       if (done) break
       sse.push(decoder.decode(value, { stream: true }))
-      while (pending.length) yield pending.shift() as string
+      while (pending.length) yield next()
     }
     sse.end()
-    while (pending.length) yield pending.shift() as string
+    while (pending.length) yield next()
   } catch (err) {
-    if (opts.signal?.aborted) throw new ApiError('aborted')
+    if (signal?.aborted) throw new ApiError('aborted')
     throw err
   } finally {
     reader.cancel().catch(() => undefined)

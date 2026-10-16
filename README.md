@@ -1,14 +1,14 @@
 # 丝译 Silk Translate · Beta
 
-面向大众的 Chrome 网页翻译扩展（Manifest V3）。只使用 **Silk AI 云端翻译**：经 Silk 后端调用 [OpenRouter](https://openrouter.ai) 上的大模型，装好即用，无需 API Key。**测试版期间免费，每天 200 万字额度。**
+面向大众的 Chrome 网页翻译扩展（Manifest V3）。只使用 **Silk AI 云端翻译**：经 Silk 后端调用 [OpenRouter](https://openrouter.ai) 上的大模型，装好即用，无需 API Key。**测试版期间免费，每天 10 万字额度。**
 界面支持**简体中文与 English**（默认跟随浏览器语言，可在面板中切换）。
 扩展：TypeScript + esbuild，无前端框架、无运行时依赖。后端：Cloudflare Worker（`server/`）。
 
-*English: a Chrome extension for in-place web page translation. It only uses the Silk AI cloud engine (no API key needed; free during the beta with 2,000,000 characters per day). During the beta it runs DeepSeek V4 Flash, the cheapest model; Claude Haiku 5.5, GPT-6 Sol and Gemini 3.8 Flash open after the beta. The interface is available in Simplified Chinese and English.*
+*English: a Chrome extension for in-place web page translation. It only uses the Silk AI cloud engine (no API key needed; free during the beta with 100,000 characters per day). During the beta it runs DeepSeek V4 Flash, the cheapest model; Claude Haiku 5.5, GPT-6 Sol and Gemini 3.8 Flash open after the beta. The interface is available in Simplified Chinese and English.*
 
 ## 功能
 
-- **四个 AI 模型**（面板「AI 模型」中切换，译文按模型分开缓存）。**测试期间只开放最便宜的 DeepSeek V4 Flash**，其余三个在面板中显示为「正式版开放」，无法选择；后端同样只放行 DeepSeek V4 Flash。
+- **四个 AI 模型**（面板「AI 模型」中切换，译文按模型分开缓存；商店描述在正式版开放前不写其他模型的名字）。**测试期间只开放最便宜的 DeepSeek V4 Flash**，其余三个在面板中显示为「正式版开放」，无法选择；后端同样只放行 DeepSeek V4 Flash。
 
   | 模型 | OpenRouter ID | 特点 | 每百万 token 输入 / 输出 | 测试期 |
   |---|---|---|---|---|
@@ -61,18 +61,24 @@ npm run build
 
 Cloudflare Worker，作用是**把 OpenRouter 的 Key 留在服务器上**（写进扩展的 Key 一定会被人拆出来盗用），并给每个安装按日限额。
 
-- 扩展首次使用时生成一个随机 UUID（安装 ID），请求时放在 `X-Silk-Install` 头里；不含任何个人信息。
-- 每次请求按提示词字符数扣额度，UTC 0 点重置。三层限额都在 `server/wrangler.toml` 里调：
-  - 每个安装：`INSTALL_DAILY_CHARS`（默认 200 万字）
-  - 每个 IP：`IP_DAILY_CHARS`（默认 600 万字，防止反复重装刷额度）
-  - 全站：`GLOBAL_DAILY_CHARS`（默认 2 亿字，钱包保护，超出后当天所有人暂停）
+- **安装令牌由服务器签发：** 扩展第一次需要时调用 `POST /v1/install`，后端生成安装 ID，返回 `token = id + "." + base64url(HMAC-SHA256(INSTALL_SECRET, id))`，扩展保存在本机，之后每个请求放在 `X-Silk-Install` 头里。后端每次用 `crypto.subtle` 验签（纯计算，不访问存储），伪造或篡改的令牌一律 `401`。每个 IP 每天最多签发 `INSTALLS_PER_IP_DAILY`（默认 3）个令牌，防止换 ID 刷额度。令牌不含任何个人信息；后端返回 `401` 时扩展丢掉旧令牌，下次请求自动申请新的。
+- **客户端只发数据，提示词由后端拼：** `POST /v1/translate` 的请求体是 `{ model?, target, title?, kind: "page" | "selection", texts }`。`target` 必须是 12 个语言代码之一，`title` ≤ 200 字；`page` 每次 1–12 段、每段 ≤ 6000 字（与扩展 `MAX_MARKUP_CHARS` 一致），`selection` 恰好 1 段、≤ 5000 字。提示词用的是扩展同一份 `src/core/prompt.ts`（wrangler 会一起打包），所以这个接口不能被当成通用的大模型 API 用。
+- **只按原文字数扣额度**，没有最低收费；输出上限仍按 `原文字数 × 2 + 256` token 封顶。UTC 0 点重置。限额都在 `server/wrangler.toml` 里调：
+  - 每个安装：`INSTALL_DAILY_CHARS`（默认 10 万字，与正式版免费档准备给的水平一致）
+  - 每个 IP：`IP_DAILY_CHARS`（默认 30 万字）
+  - 全站：`GLOBAL_DAILY_CHARS`（默认 2 亿字，钱包保护）。拆成 16 个分片计数（每片上限是总数的 1/16），每次随机选一片，**在响应返回后**用 `ctx.waitUntil` 异步扣，不阻塞请求；任何一片报告超额，这个 Worker 实例当天剩下的时间里拒绝新请求。安装和 IP 两层仍然同步扣（两个 DO 并行调用）。
+- **共享翻译缓存：** 每一段的译文按 `sha256(模型|目标语言|kind|原文)` 存进 Cloudflare 缓存（`caches.default`，7 天）。请求进来先逐段查缓存，命中的段落立刻流式返回、不扣额度，只把没命中的发给 OpenRouter。看起来被截断或丢了格式标记的译文不进缓存。⚠️ `caches.default` 只在挂了自定义域名的 Worker 上可靠生效，`*.workers.dev` 上可能是空操作，上线后请用指标里的 `cacheHits` 确认。
+- **响应格式：** `text/event-stream`，每行一个事件：`{"index":0,"text":"…"}`（整页，一段译完一行）、`{"delta":"…"}`（划词，流式片段）、`{"error":{"code","message"}}`，最后是 `[DONE]`。没有缓存命中时，上游失败直接返回 HTTP 错误（`502 upstream_error`，扩展会自动重试）；已经先发了缓存段落时，上游失败以 `error` 事件结束，只退还没送达段落的额度。
 - 模型由客户端在请求的 `model` 字段中指定。`server/src/app.ts` 的 `MODELS` 是全部已知模型（与扩展的 `CLOUD_MODELS` 一致），未知模型返回 `400`；`PLAN_MODELS` 决定每个套餐能用哪些：测试版只有 `deepseek/deepseek-v4-flash`，`pro` 全部可用。请求套餐外的模型返回 `403` 并带 `X-Silk-Error: model_locked`，不扣额度；不传模型时用套餐的第一个。
 - `GET /v1/entitlement` 会返回套餐可用的 `models`，扩展据此锁定面板里的其他模型；用户之前选了锁定的模型时，自动改用套餐默认模型。
 - 同一个模型在 OpenRouter 上由多家服务商提供，速度差很多（DeepSeek V4 Flash 约 5–80 token/秒）。后端请求时带上 `provider.preferred_min_throughput`（`MIN_PROVIDER_THROUGHPUT`，默认 50）：达不到这个速度的服务商排到后面，只在其他都不可用时才用，所以总是先用「够快的里面最便宜的」。
 - DeepSeek V4 Flash 支持推理模式，后端请求时带 `reasoning: { effort: "none" }` 关闭思考，避免多花输出 token（`MODEL_OPTIONS`）。
+- 系统提示词是常量，目标语言和页面标题放在 user 消息里，服务商的前缀缓存可以跨语言、跨页面、跨用户命中。
+- **性能指标：** 每个 `/v1/translate` 请求往 Workers Analytics Engine（绑定 `METRICS`，数据集 `silk_translate_requests`）写一个数据点：`blobs = [模型, 服务商, 错误码, kind]`，`doubles = [原文字数, 首个 token 耗时 ms, 总耗时 ms, 命中提示词缓存的 token 数, 共享缓存命中段数]`。服务商和缓存 token 数取自 OpenRouter 流的 `provider` 字段和最后一个 chunk 的 `usage.prompt_tokens_details.cached_tokens`（OpenRouter 现在默认在每个响应里返回 usage，不需要再传参数）。
 - 额度按字数计，不区分模型；正式版开放贵的模型时，建议按模型设不同额度（GPT-6 Sol 的价格约是 DeepSeek V4 Flash 的 30–50 倍）。
 - OpenRouter 出错时会退还本次扣的额度，客户端的自动重试不会白扣额度。
-- 接口：`GET /v1/entitlement`（套餐与今日额度）、`POST /v1/chat/completions`（OpenAI 兼容，流式）。JSON 响应统一为 `{ success, data, error, meta }`；额度用完返回 `429` 并带 `X-Silk-Error: quota_exceeded`。
+- 接口：`POST /v1/install`（签发安装令牌）、`GET /v1/entitlement`（套餐与今日额度）、`POST /v1/translate`（翻译，流式）。JSON 响应统一为 `{ success, data, error, meta }`；额度用完返回 `429` 并带 `X-Silk-Error: quota_exceeded`。
+- **旧版过渡：** v2.2 及更早的扩展用自己生成的 UUID 调用 `POST /v1/chat/completions`。在 `LEGACY_UNTIL`（默认 2026-10-31）之前，这个接口和未签名的 UUID 继续可用，但它们发来的所有请求共用每天 `LEGACY_DAILY_CHARS`（默认 20 万字）；之后 `/v1/chat/completions` 返回 `410`，未签名的 UUID 返回 `401`。
 
 ### 部署
 
@@ -81,12 +87,17 @@ cd server
 npm install
 npx wrangler login                          # 浏览器授权 Cloudflare 账号
 npx wrangler secret put OPENROUTER_API_KEY  # 粘贴 OpenRouter Key（https://openrouter.ai/keys）
+npx wrangler secret put INSTALL_SECRET      # 签发安装令牌的密钥，例如 `openssl rand -base64 32` 的输出；更换后所有安装会自动重新申请令牌
 npx wrangler deploy                         # 输出 https://silk-translate-api.<你的子域>.workers.dev
 ```
 
+**先部署后端，再发布 v2.3 扩展**：新版扩展只用 `/v1/install` 和 `/v1/translate`，旧后端没有这两个接口。
+
+推送 `server-v*` 标签（如 `git tag server-v2.3.0 && git push origin server-v2.3.0`）时，GitHub Actions 会在测试通过后自动 `wrangler deploy`，需要在仓库 Secrets 里配置 `CLOUDFLARE_API_TOKEN`（Cloudflare 的「Edit Cloudflare Workers」模板即可）。
+
 正式后端已部署在 `https://silk-translate-api.silktranslate.workers.dev`，并且是 `build.mjs` 的默认地址，直接 `npm run package` 即可。部署到别的地址时，用 `SILK_API_URL=… npm run package` 覆盖。
 
-建议在 OpenRouter 后台给这个 Key 设置**消费上限**，作为全站额度之外的第二道保险。本地调试：`server/.dev.vars` 写入 `OPENROUTER_API_KEY=…` 后运行 `npm run dev`（`http://127.0.0.1:8787`），再用 `SILK_API_URL=http://127.0.0.1:8787 npm run build` 构建连本地后端的扩展。
+建议在 OpenRouter 后台给这个 Key 设置**消费上限**，作为全站额度之外的第二道保险。本地调试：`server/.dev.vars` 写入 `OPENROUTER_API_KEY=…` 和 `INSTALL_SECRET=…` 后运行 `npm run dev`（`http://127.0.0.1:8787`），再用 `SILK_API_URL=http://127.0.0.1:8787 npm run build` 构建连本地后端的扩展。
 
 ### 构建参数
 
@@ -101,14 +112,17 @@ npx wrangler deploy                         # 输出 https://silk-translate-api.
 付费逻辑只需改后端，扩展基本不用动：
 
 - `src/shared/entitlement.ts` 定义套餐（`beta` / `free` / `pro`）和功能（目前只有 `cloud-ai`）。
-- 后端 `server/src/app.ts` 的 `CURRENT_PLAN` 现在固定为 `beta`。接入支付（如 Stripe、Paddle）后，改成按安装 ID 或账户查询付费状态，并给不同套餐不同额度和模型（`PLAN_MODELS`）。
+- 后端 `server/src/app.ts` 的 `resolvePlan(installId)` 先查 KV（绑定 `PLANS`，键 `plan:<id>`），查不到就用 `DEFAULT_PLAN`（测试期是 `beta`，没设置时是 `free`）。`/v1/entitlement` 和 `/v1/translate` 都走这个函数，以后支付回调只需要写 KV；`wrangler.toml` 里留了 KV 绑定的注释。正式上线时把 `DEFAULT_PLAN` 改成 `free`。
 - 后端对没有权限的请求返回 `402`，扩展显示「当前套餐不包含 Silk AI 云端翻译」。扩展本地也会缓存套餐，提前拦下注定失败的请求，但真正的限制以后端为准。
+- **免费层用 Chrome 内置翻译：** 套餐不含云端 AI 时，内容脚本检测 `'Translator' in self`：可用就用浏览器自带的本地翻译（Translator API，源语言用 LanguageDetector 或页面 `lang` 判断；本地翻译不保留链接等格式标记，按纯文本显示），本地翻不了的段落再交给云端（以后给免费档少量 AI 额度）。Translator API 要求的 Chrome 版本比 `minimum_chrome_version: 116` 高，所以只做特性检测，不提高最低版本。目前只用于整页翻译，划词翻译仍走云端。
 - 正式版用 `SILK_CHANNEL=stable` 构建：服务器回复前默认按免费版处理。
 
 ## 隐私
 
-- 待翻译的网页文本会发送到 Silk 后端，再转给 OpenRouter 上所选的模型；后端不保存文本，只按匿名安装 ID 记录当天用了多少字。
-- 设置只保存在本机 `chrome.storage.local`；扩展不包含任何统计或第三方请求。
+- 待翻译的网页文本会发送到 Silk 后端，再转给 OpenRouter 上所选的模型；后端只按匿名安装 ID 记录当天用了多少字。
+- **共享翻译缓存：** 为了更快、更省，后端把每一段的译文按「模型 + 目标语言 + 原文」的哈希缓存 7 天，其他用户翻译**完全相同的原文**时直接复用。缓存的键是原文的 SHA-256，拿到某段译文的前提是已经拥有一字不差的原文，所以不会泄露别人页面的内容；缓存里不记录是谁、在哪个网页翻译的。（发布前请把这一条写进商店的隐私政策。）
+- 扩展把译文缓存在本机（内存 + IndexedDB，最多 5 万条，超出删最旧的），不上传。
+- 设置和安装令牌只保存在本机 `chrome.storage.local`；扩展不包含任何统计或第三方请求。后端的性能指标只记录模型、服务商、字数和耗时，不记录文本和安装 ID。
 - 所有扩展 UI 渲染在独立的 Shadow DOM 中，不影响页面样式。
 
 ## 开发
@@ -122,22 +136,23 @@ npm run e2e         # Playwright 真浏览器端到端测试（自动构建一�
 npm run icons       # 重新生成 static/icons 下的 PNG 图标
 ```
 
-E2E 使用本地 mock 服务器模拟 Silk 后端：SSE 流式响应、429 限流、并发统计、额度查询、匿名安装 ID、按套餐锁定模型（测试版 / 正式版）、额度用完，以及中英文界面切换；不消耗真实 API 额度，截图输出到 `e2e/output/`。
+E2E 使用本地 mock 服务器模拟 Silk 后端：签发安装令牌、`/v1/translate` 事件流、429 限流、并发统计、额度查询、按套餐锁定模型（测试版 / 正式版）、额度用完，以及中英文界面切换；不消耗真实 API 额度，截图输出到 `e2e/output/`。
 后端的单元测试在 `tests/server.test.ts`，和扩展一起由 `npm test` 运行。
-如 Playwright 浏览器装在非默认位置，请设置 `PLAYWRIGHT_BROWSERS_PATH`。
+如 Playwright 浏览器装在非默认位置，请设置 `PLAYWRIGHT_BROWSERS_PATH`；要用一个现成的 Chromium（版本和 Playwright 期望的不同也行），设置 `SILK_E2E_CHROMIUM=<chrome 可执行文件路径>`。
+每次 push 和 PR 都会在 GitHub Actions（`.github/workflows/ci.yml`）里跑 `npm ci`、两边的类型检查和 `npm test`。
 
 ### 目录结构
 
 ```
 src/
-├── background/   Service Worker：Silk 后端调用（SSE + 重试）、匿名安装 ID 与套餐、LRU 缓存、并发池
-├── content/      内容脚本：DOM 扫描与分段、翻译单元渲染、懒加载、SPA 监听
+├── background/   Service Worker：Silk 后端调用（SSE + 重试）、安装令牌与套餐、内存 LRU + IndexedDB 缓存、并发池
+├── content/      内容脚本：DOM 扫描与分段、翻译单元渲染、懒加载、SPA 监听、Chrome 内置翻译（免费层）
 │   └── ui/       Shadow DOM UI：悬浮控制条、划词翻译卡片
-├── core/         与浏览器无关的纯逻辑：markup 序列化/还原、流式 JSON 解析、SSE、并发池、文本过滤、prompt
+├── core/         与浏览器无关的纯逻辑：markup 序列化/还原、流式 JSON 解析、SSE、并发池、文本过滤、prompt、译文检查（后端也复用其中不依赖 DOM 的部分）
 ├── popup/        工具栏面板
 └── shared/       设置（含输入校验与模型列表）、界面文案（i18n）、消息协议、语言表、快捷键、套餐
 static/           manifest.json 与图标
-server/           Silk 后端（Cloudflare Worker）：OpenRouter 代理、模型白名单、按日限额（Durable Object）、套餐
+server/           Silk 后端（Cloudflare Worker）：安装令牌、翻译接口（后端拼提示词）、共享缓存、模型白名单、按日限额（Durable Object）、套餐、性能指标
 tests/            单元测试（含后端）
 e2e/              端到端测试（fixture 页面 + mock 后端）
 ```

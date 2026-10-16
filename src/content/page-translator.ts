@@ -79,6 +79,7 @@ export class PageTranslator {
       },
       () => document.title,
       () => translator(resolveUiLang(this.settings.uiLang)),
+      () => this.settings.targetLang,
     )
   }
 

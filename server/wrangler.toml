@@ -5,11 +5,20 @@ compatibility_date = "2026-10-01"
 [vars]
 # Models are an allowlist in src/app.ts (MODELS); PLAN_MODELS decides which ones each plan may
 # use (the beta only gets deepseek/deepseek-v4-flash). The extension picks one per request.
-# Daily limits, counted in prompt characters, reset at UTC midnight.
-INSTALL_DAILY_CHARS = "2000000"
-IP_DAILY_CHARS = "6000000"
-# Wallet guard across all users; raise as the beta grows.
+# Plan of installs without a stored one (see resolvePlan); set to "free" when paid plans launch.
+DEFAULT_PLAN = "beta"
+# Daily limits, counted in source characters sent to the model (cache hits are free), reset at
+# UTC midnight. The per-install limit is the level planned for the free tier after launch.
+INSTALL_DAILY_CHARS = "100000"
+IP_DAILY_CHARS = "300000"
+# Wallet guard across all users, split over 16 counters; raise as the beta grows.
 GLOBAL_DAILY_CHARS = "200000000"
+# New install tokens per client IP per day (POST /v1/install).
+INSTALLS_PER_IP_DAILY = "3"
+# Transition for extension <= 2.2 (unsigned install ids, /v1/chat/completions): everything it
+# sends shares LEGACY_DAILY_CHARS per day, and after LEGACY_UNTIL the old endpoint answers 410.
+LEGACY_UNTIL = "2026-10-31T00:00:00Z"
+LEGACY_DAILY_CHARS = "200000"
 # Single request ceilings.
 MAX_REQUEST_CHARS = "24000"
 MAX_OUTPUT_TOKENS = "8192"
@@ -19,7 +28,9 @@ MIN_PROVIDER_THROUGHPUT = "50"
 APP_URL = "https://github.com/riwshss/SiliconTranslate"
 APP_TITLE = "Silk Translate"
 
-# Secret, never committed: npx wrangler secret put OPENROUTER_API_KEY
+# Secrets, never committed:
+#   npx wrangler secret put OPENROUTER_API_KEY
+#   npx wrangler secret put INSTALL_SECRET      (e.g. `openssl rand -base64 32`; rotating it signs everyone out)
 
 [[durable_objects.bindings]]
 name = "QUOTA"
@@ -28,3 +39,14 @@ class_name = "QuotaCounter"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["QuotaCounter"]
+
+# One data point per /v1/translate request: blobs [model, provider, errorCode, kind],
+# doubles [chars, ttftMs, totalMs, cachedTokens, cacheHits].
+[[analytics_engine_datasets]]
+binding = "METRICS"
+dataset = "silk_translate_requests"
+
+# Paid plans, once they launch: `npx wrangler kv namespace create PLANS`, then
+# [[kv_namespaces]]
+# binding = "PLANS"
+# id = "<namespace id>"

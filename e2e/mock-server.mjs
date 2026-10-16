@@ -1,6 +1,7 @@
-// Fake Silk backend for E2E: streams deterministic "translations", answers the first batch with
-// 429 to exercise backoff, and records concurrency. Every request must carry X-Silk-Install and no
-// API key; /v1/entitlement reports the plan, and the quota can be switched to exhausted.
+// Fake Silk backend for E2E: issues install tokens, streams deterministic "translations" in the
+// /v1/translate event format, answers the first batch with 429 to exercise backoff, and records
+// concurrency. Every request must carry an issued token in X-Silk-Install and no API key;
+// /v1/entitlement reports the plan, and the quota can be switched to exhausted.
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 
@@ -12,20 +13,22 @@ export const stats = { batchRequests: 0, items: 0, textRequests: 0, rateLimited:
 /** Every model the extension offers, cheapest (the only one open during the beta) first. */
 export const ALL_MODELS = ['deepseek/deepseek-v4-flash', 'anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash']
 /**
- * Silk backend side: requests seen, install ids, models asked for, the current plan and its
- * models (switchable to pro), and a switch that makes every request over quota.
+ * Silk backend side: requests seen, tokens issued and used, models asked for, request bodies,
+ * the current plan and its models (switchable to pro), and a switch that makes every request
+ * over quota.
  */
 export const cloud = {
   requests: 0,
   quotaHits: 0,
+  issued: new Set(),
   installIds: new Set(),
+  bodies: [],
   models: [],
   withAuthorization: 0,
   isQuotaExhausted: false,
   plan: 'beta',
   planModels: ALL_MODELS.slice(0, 1),
 }
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const JSON_CORS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
 
 /** "Click <g0>this guide</g0> now" → "译·Click <g0>译·this guide</g0> 译·now" (frozen <cN> content kept). */
@@ -48,15 +51,17 @@ export function fakeTranslate(markup) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-async function streamText(res, text) {
+/** Writes /v1/translate events one by one, then [DONE]. */
+async function streamEvents(res, events) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Access-Control-Allow-Origin': '*' })
-  for (let i = 0; i < text.length; i += CHUNK) {
-    const delta = { choices: [{ delta: { content: text.slice(i, i + CHUNK) } }] }
-    res.write(`data: ${JSON.stringify(delta)}\n\n`)
+  for (const event of events) {
+    res.write(`data: ${JSON.stringify(event)}\n\n`)
     await sleep(CHUNK_DELAY_MS)
   }
   res.end('data: [DONE]\n\n')
 }
+
+const deltas = (text) => Array.from({ length: Math.ceil(text.length / CHUNK) }, (_, i) => ({ delta: text.slice(i * CHUNK, (i + 1) * CHUNK) }))
 
 function readBody(req) {
   return new Promise((resolve) => {
@@ -66,12 +71,19 @@ function readBody(req) {
   })
 }
 
-/** Silk backend auth: valid install id, no API key. Returns false once it has answered the request. */
+function handleInstall(_req, res) {
+  const token = `${crypto.randomUUID()}.${'s'.repeat(43)}`
+  cloud.issued.add(token)
+  res.writeHead(200, JSON_CORS)
+  res.end(JSON.stringify({ success: true, data: { token }, error: null, meta: null }))
+}
+
+/** Silk backend auth: a token this server issued, no API key. Returns false once it has answered the request. */
 function acceptCloud(req, res) {
   const id = req.headers['x-silk-install']
-  if (!UUID_RE.test(id ?? '')) {
+  if (!cloud.issued.has(id)) {
     res.writeHead(401, { ...JSON_CORS, 'X-Silk-Error': 'unauthorized' })
-    res.end(JSON.stringify({ success: false, data: null, error: { code: 'unauthorized', message: 'bad install id' } }))
+    res.end(JSON.stringify({ success: false, data: null, error: { code: 'unauthorized', message: 'bad install token' } }))
     return false
   }
   cloud.installIds.add(id)
@@ -81,16 +93,17 @@ function acceptCloud(req, res) {
 
 function handleEntitlement(req, res) {
   if (!acceptCloud(req, res)) return
-  const quota = { used: cloud.isQuotaExhausted ? 2000000 : 1234, limit: 2000000, resetAt: '2026-10-18T00:00:00.000Z' }
+  const quota = { used: cloud.isQuotaExhausted ? 100000 : 1234, limit: 100000, resetAt: '2026-10-18T00:00:00.000Z' }
   res.writeHead(200, JSON_CORS)
   res.end(JSON.stringify({ success: true, data: { plan: cloud.plan, features: ['cloud-ai'], models: cloud.planModels, quota }, error: null, meta: null }))
 }
 
-async function handleChat(req, res) {
+async function handleTranslate(req, res) {
   const body = JSON.parse(await readBody(req))
   if (!acceptCloud(req, res)) return
   cloud.requests++
   cloud.models.push(body.model)
+  cloud.bodies.push(body)
   if (body.model && !cloud.planModels.includes(body.model)) {
     res.writeHead(403, { ...JSON_CORS, 'X-Silk-Error': 'model_locked' })
     return res.end(JSON.stringify({ success: false, data: null, error: { code: 'model_locked', message: 'This model is not available on your plan' } }))
@@ -100,15 +113,9 @@ async function handleChat(req, res) {
     res.writeHead(429, { ...JSON_CORS, 'X-Silk-Error': 'quota_exceeded' })
     return res.end(JSON.stringify({ success: false, data: null, error: { code: 'quota_exceeded', message: 'Daily free quota used up' } }))
   }
-  if (!body.stream) {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
-    return res.end(JSON.stringify({ choices: [{ message: { content: 'p' } }] }))
-  }
-  const system = body.messages[0].content
-  const user = body.messages[1].content
-  if (!system.includes('JSON object')) {
+  if (body.kind === 'selection') {
     stats.textRequests++
-    return streamText(res, `划词译文：${user}`)
+    return streamEvents(res, deltas(`划词译文：${body.texts[0]}`))
   }
   stats.batchRequests++
   if (stats.batchRequests === 1) {
@@ -116,14 +123,16 @@ async function handleChat(req, res) {
     res.writeHead(429, { 'Retry-After': '1', 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
     return res.end(JSON.stringify({ message: 'TPM limit reached' }))
   }
-  const input = JSON.parse(user)
-  Object.values(input).forEach((v) => stats.keys.add(v))
-  stats.items += Object.keys(input).length
-  const output = Object.fromEntries(Object.entries(input).map(([k, v]) => [k, fakeTranslate(v)]))
+  body.texts.forEach((v) => stats.keys.add(v))
+  stats.items += body.texts.length
   stats.active++
   stats.peak = Math.max(stats.peak, stats.active)
   try {
-    await streamText(res, JSON.stringify(output))
+    // Paragraphs finish in order, each after a few chunks' worth of time, like a streamed reply.
+    await streamEvents(
+      res,
+      body.texts.map((text, index) => ({ index, text: fakeTranslate(text) })),
+    )
   } finally {
     stats.active--
   }
@@ -145,8 +154,9 @@ export function startMockServer(port = 0) {
       return res.end(FIXTURE)
     }
     if (req.url === '/v1/entitlement' && req.method === 'GET') return handleEntitlement(req, res)
-    if (req.url === '/v1/chat/completions' && req.method === 'POST') {
-      return handleChat(req, res).catch((err) => {
+    if (req.url === '/v1/install' && req.method === 'POST') return handleInstall(req, res)
+    if (req.url === '/v1/translate' && req.method === 'POST') {
+      return handleTranslate(req, res).catch((err) => {
         console.error(err)
         res.writeHead(500)
         res.end()

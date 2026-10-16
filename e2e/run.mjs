@@ -1,5 +1,6 @@
 // End-to-end check in a real Chromium with the unpacked extension loaded.
 // Usage: npm run e2e   (builds an E2E variant whose Silk backend is the mock server; screenshots → e2e/output/)
+// SILK_E2E_CHROMIUM=/path/to/chrome uses that browser instead of Playwright's own download.
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -38,6 +39,8 @@ const origin = MOCK_ORIGIN
 const profile = mkdtempSync(join(tmpdir(), 'silk-e2e-'))
 const context = await chromium.launchPersistentContext(profile, {
   channel: 'chromium',
+  // A Chromium other than the one this Playwright version expects (e.g. preinstalled on CI).
+  executablePath: process.env.SILK_E2E_CHROMIUM || undefined,
   headless: true,
   viewport: { width: 1100, height: 760 },
   args: [`--disable-extensions-except=${DIST}`, `--load-extension=${DIST}`],
@@ -46,6 +49,8 @@ const context = await chromium.launchPersistentContext(profile, {
 try {
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
   const extensionId = new URL(worker.url()).host
+  // Right after start-up the worker can run before its extension APIs are bound.
+  await worker.evaluate(() => new Promise((resolve) => (function wait() { globalThis.chrome?.storage ? resolve() : setTimeout(wait, 50) })()))
   // Settings left over from older versions (engine, API key) must be ignored, and the chosen model is
   // locked during the beta (requests fall back to the cheapest); Chinese UI for the checks below.
   await worker.evaluate(() =>
@@ -75,9 +80,12 @@ try {
     await page.waitForFunction(() => document.getElementById('p1').textContent.includes('译·'), null, { timeout: 15000 })
     assert(stats.rateLimited === 1, `rateLimited=${stats.rateLimited}`)
   })
-  await check('请求走 Silk 后端：测试期只用最便宜的模型、匿名安装 ID、不带 API Key', async () => {
+  await check('请求走 Silk 后端：测试期只用最便宜的模型、服务器签发的安装令牌、只发数据不发提示词、不带 API Key', async () => {
     assert(cloud.models.length > 0 && cloud.models.every((m) => m === 'deepseek/deepseek-v4-flash'), cloud.models.join(','))
-    assert(cloud.installIds.size === 1, `install ids ${cloud.installIds.size}`)
+    assert(cloud.issued.size === 1 && cloud.installIds.size === 1, `issued ${cloud.issued.size}, used ${cloud.installIds.size}`)
+    const body = cloud.bodies[0]
+    assert(Object.keys(body).sort().join() === 'kind,model,target,texts,title', Object.keys(body).join())
+    assert(body.kind === 'page' && body.target === 'zh-CN', JSON.stringify(body))
     assert(cloud.withAuthorization === 0, 'Authorization header leaked to the Silk backend')
   })
   await check('内联结构保留：链接节点、href、strong、code 都没变', async () => {
@@ -106,6 +114,8 @@ try {
     assert((await text('#num')) === '2026-10-15 · 12:30', 'num changed')
   })
   await check('Flex 导航项分别翻译', async () => {
+    // The nav leads the first (tiny) batch, which the mock answers with 429 first: wait for the retry.
+    await page.waitForFunction(() => document.querySelector('#nav a:nth-child(2)').textContent.startsWith('译·'), null, { timeout: 15000 })
     assert((await text('#nav a:nth-child(2)')) === '译·Documentation', await text('#nav a:nth-child(2)'))
   })
   await page.screenshot({ path: join(OUT, '1-overlay.png') })
@@ -128,6 +138,11 @@ try {
   await page.evaluate(() => scrollTo(0, 0))
 
   console.log('\n模式切换（全部来自缓存）')
+  // Let prefetch batches started by the scroll finish before counting.
+  for (let seen = -1; seen !== stats.batchRequests || stats.active; ) {
+    seen = stats.batchRequests
+    await page.waitForTimeout(600)
+  }
   const requestsBeforeSwitch = stats.batchRequests
   await check('双语模式：原文恢复 + 译文元素插入', async () => {
     await page.click('silk-ui .seg button[data-mode="bilingual"]')
@@ -184,10 +199,10 @@ try {
   const popup = await context.newPage()
   await popup.setViewportSize({ width: 372, height: 900 })
   await popup.goto(`chrome-extension://${extensionId}/popup.html`)
-  await check('Popup 显示测试版与今日额度（200万字）', async () => {
+  await check('Popup 显示测试版与今日额度（10万字）', async () => {
     await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('今日已用'))
     const result = await popup.$eval('#test-result', (el) => el.textContent)
-    assert(result.includes('测试版') && result.includes('1234') && result.includes('200万'), result)
+    assert(result.includes('测试版') && result.includes('1234') && result.includes('10万'), result)
     assert((await popup.$eval('#conn', (el) => el.textContent)) === '可用', 'conn pill')
     assert(!(await popup.$eval('#beta-badge', (el) => el.hidden)), 'beta badge hidden')
   })
@@ -234,9 +249,11 @@ try {
     await popup.selectOption('#ui-lang', 'en')
     await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('Used today'))
     assert((await popup.$eval('#translate-btn', (el) => el.textContent.trim())) === 'Translate this page', 'translate button')
-    assert((await popup.$eval('#test-result', (el) => el.textContent)).includes('2M'), 'quota in English')
+    assert((await popup.$eval('#test-result', (el) => el.textContent)).includes('100K'), 'quota in English')
     assert((await popup.$eval('html', (el) => el.lang)) === 'en', 'html lang')
-    assert((await popup.$eval('#host', (el) => el.textContent)) === 'chrome-extension page', 'host label')
+    // The popup runs in a tab of its own here; without the `tabs` permission Chrome hides that tab's
+    // URL (tab.url is undefined), so the popup shows its placeholder instead of the page kind.
+    assert((await popup.$eval('#host', (el) => el.textContent)) === '—', 'host label')
   })
   await popup.screenshot({ path: join(OUT, '6-popup-english.png'), fullPage: true })
   await check('页面 HUD 随之切换为英文', async () => {
@@ -259,10 +276,10 @@ try {
     }
     const cardText = () => page.$eval('silk-ui', (el) => el.shadowRoot.querySelector('.result')?.textContent ?? '')
     await check('直接请求锁定模型会被后端拒绝（403 model_locked）', async () => {
-      const res = await fetch(`${origin}/v1/chat/completions`, {
+      const res = await fetch(`${origin}/v1/translate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Silk-Install': [...cloud.installIds][0] },
-        body: JSON.stringify({ model: 'openai/gpt-6-sol', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+        body: JSON.stringify({ model: 'openai/gpt-6-sol', target: 'zh-CN', kind: 'selection', texts: ['hi'] }),
       })
       assert(res.status === 403 && res.headers.get('x-silk-error') === 'model_locked', `${res.status}`)
     })
@@ -287,7 +304,7 @@ try {
       await popup.click('#test-btn')
       await popup.waitForFunction(() => document.querySelectorAll('.model[aria-disabled="true"]').length === 3)
     })
-    await check('划词翻译走 Silk 后端：测试期回落到最便宜的模型、匿名安装 ID、不带 API Key', async () => {
+    await check('划词翻译走 Silk 后端：测试期回落到最便宜的模型、同一个安装令牌、不带 API Key', async () => {
       const before = cloud.models.length
       await selectAndTranslate('#title')
       await page.waitForFunction(

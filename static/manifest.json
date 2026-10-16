@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "丝译 Silk Translate",
   "short_name": "丝译",
-  "version": "2.2.1",
-  "description": "无痕网页翻译 · Seamless web page translation. Silk AI 云端翻译，可选 Claude Haiku 5.5 / GPT-6 Sol / Gemini 3.8 Flash；双语对照，划词翻译。",
+  "version": "2.3.0",
+  "description": "无痕网页翻译 · Seamless web page translation. Silk AI 云端翻译 · 双语对照 · 划词翻译。",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",

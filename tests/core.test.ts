@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createObjectStreamParser } from '../src/core/stream-json'
 import { createSseParser } from '../src/core/sse'
 import { ConcurrencyPool } from '../src/core/pool'
-import { MAX_BATCH_CHARS, MAX_BATCH_ITEMS, MIN_BATCH_CHARS, splitBatches } from '../src/core/batching'
+import { FIRST_BATCH_CHARS, FIRST_BATCH_ITEMS, MAX_BATCH_CHARS, MAX_BATCH_ITEMS, MIN_BATCH_CHARS, splitBatches } from '../src/core/batching'
 import { LruCache } from '../src/core/lru'
 import { guessLanguageByScript, isLikelyInLanguage, shouldTranslateText } from '../src/core/text-filter'
-import { buildBatchMessages } from '../src/core/prompt'
+import { BATCH_SYSTEM_PROMPT, buildBatchMessages } from '../src/core/prompt'
 import { ApiError, toApiError } from '../src/core/errors'
 
 describe('createObjectStreamParser', () => {
@@ -102,9 +102,22 @@ describe('splitBatches', () => {
   })
 
   it('does not split below the minimum batch size', () => {
-    const batches = splitBatches(texts(10, 60), 8)
-    expect(batches).toHaveLength(2)
-    expect(sizes(batches)[0]).toBeGreaterThanOrEqual(MIN_BATCH_CHARS)
+    const batches = splitBatches(texts(10, 40), 8)
+    expect(batches).toHaveLength(3)
+    sizes(batches.slice(0, -1)).forEach((size) => expect(size).toBeGreaterThanOrEqual(MIN_BATCH_CHARS))
+  })
+
+  it('can lead with a tiny batch so the first translation shows up early', () => {
+    const input = texts(24, 150)
+    const batches = splitBatches(input, 8, true)
+    expect(batches[0]).toEqual(input.slice(0, 2))
+    expect(sizes([batches[0]])[0]).toBeLessThanOrEqual(FIRST_BATCH_CHARS)
+    expect(batches.flat()).toEqual(input)
+    expect(batches.length).toBeLessThanOrEqual(8)
+    expect(splitBatches(texts(10, 20), 8, true)[0]).toHaveLength(FIRST_BATCH_ITEMS)
+    // An oversized first key still goes out alone.
+    expect(splitBatches(['a'.repeat(900), 'b'], 8, true)).toEqual([['a'.repeat(900)], ['b']])
+    expect(splitBatches([], 8, true)).toEqual([])
   })
 
   it('respects the per-request ceilings and keeps order', () => {
@@ -211,11 +224,13 @@ describe('text filter', () => {
 })
 
 describe('prompt', () => {
-  it('sends a keyed JSON object and mentions the target language and page title', () => {
+  it('keeps the system prompt fixed and puts language, page title and a keyed JSON object in the user message', () => {
     const [system, user] = buildBatchMessages(['a', 'b'], 'Simplified Chinese', 'My Page')
-    expect(JSON.parse(user.content)).toEqual({ 0: 'a', 1: 'b' })
-    expect(system.content).toContain('Simplified Chinese')
-    expect(system.content).toContain('My Page')
+    expect(system.content).toBe(BATCH_SYSTEM_PROMPT)
+    expect(buildBatchMessages(['c'], 'Japanese', '')[0].content).toBe(BATCH_SYSTEM_PROMPT)
+    const [head, payload] = user.content.split('\n\n')
+    expect(head).toBe('Target language: Simplified Chinese\nPage title: My Page')
+    expect(JSON.parse(payload)).toEqual({ 0: 'a', 1: 'b' })
   })
 })
 
