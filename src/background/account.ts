@@ -3,6 +3,7 @@
 // and only lets the backend count a daily quota per install.
 
 import { ApiError } from '../core/errors'
+import { DEV_KEY_STORAGE_KEY, sanitizeDevKey } from '../shared/dev-key'
 import { defaultEntitlement, effectiveModel, ENTITLEMENT_KEY, sanitizeEntitlement, type Entitlement } from '../shared/entitlement'
 import { CLOUD_API_URL, RELEASE_CHANNEL } from '../shared/service'
 import { fetchWithRetry, type ApiConfig } from './api'
@@ -44,9 +45,16 @@ export async function forgetInstallToken(): Promise<void> {
   await chrome.storage.local.remove(TOKEN_KEY)
 }
 
+/** Headers of every Silk request: the install token, plus the developer key once one is pasted. */
+async function silkHeaders(): Promise<Record<string, string>> {
+  const [token, stored] = await Promise.all([getInstallToken(), chrome.storage.local.get(DEV_KEY_STORAGE_KEY)])
+  const devKey = sanitizeDevKey(stored[DEV_KEY_STORAGE_KEY])
+  return devKey ? { 'X-Silk-Install': token, 'X-Silk-Dev-Key': devKey } : { 'X-Silk-Install': token }
+}
+
 /** `model` must be one the plan allows (see usableModel); the backend checks it again. */
 export async function cloudApiConfig(model: string): Promise<ApiConfig> {
-  return { baseUrl: `${CLOUD_API_URL}/v1`, model, headers: { 'X-Silk-Install': await getInstallToken() } }
+  return { baseUrl: `${CLOUD_API_URL}/v1`, model, headers: await silkHeaders() }
 }
 
 /** Last entitlement the backend reported, or the channel default before the first answer. */
@@ -57,7 +65,7 @@ export async function cachedEntitlement(): Promise<Entitlement> {
 
 /** Asks the backend for the current plan and quota and caches the answer. */
 export async function refreshEntitlement(signal?: AbortSignal): Promise<Entitlement> {
-  const res = await fetchWithRetry(`${CLOUD_API_URL}/v1/entitlement`, { headers: { 'X-Silk-Install': await getInstallToken() } }, signal)
+  const res = await fetchWithRetry(`${CLOUD_API_URL}/v1/entitlement`, { headers: await silkHeaders() }, signal)
   const body = (await res.json().catch(() => null)) as { success?: unknown; data?: unknown } | null
   const entitlement = body?.success === true ? sanitizeEntitlement(body.data) : null
   if (!entitlement) throw new ApiError('bad-response', 'badAccount')

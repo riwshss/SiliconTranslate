@@ -34,6 +34,11 @@ export interface Env {
    * A wrangler secret, so the list never lands in the repository.
    */
   readonly DEV_INSTALL_IDS?: string
+  /**
+   * Developer key (a wrangler secret, at least 32 characters): any install that sends it as
+   * X-Silk-Dev-Key gets the developer plan, so the owner pastes it once per browser.
+   */
+  readonly DEV_KEY?: string
   readonly MAX_REQUEST_CHARS: string
   readonly MAX_OUTPUT_TOKENS: string
   /** Tokens/s (median) a provider should reach to be tried first; slower ones become fallbacks. */
@@ -138,7 +143,7 @@ export const GLOBAL_SHARDS = 16
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Silk-Install',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Silk-Install, X-Silk-Dev-Key',
   'Access-Control-Expose-Headers': 'X-Silk-Error',
 }
 
@@ -283,6 +288,26 @@ export async function resolvePlan(id: string, env: Env, deps: Deps): Promise<Pla
 const installCounter = (id: string) => `v2:install:${id}`
 const ipCounter = (request: Request) => `v2:ip:${clientIp(request)}`
 
+const MIN_DEV_KEY_LENGTH = 32
+
+/** Whether the request carries the developer key; digests are compared in constant time. */
+async function hasDevKey(request: Request, env: Env): Promise<boolean> {
+  const expected = env.DEV_KEY ?? ''
+  const given = request.headers.get('X-Silk-Dev-Key') ?? ''
+  if (expected.length < MIN_DEV_KEY_LENGTH || !given) return false
+  const [a, b] = await Promise.all([given, expected].map((key) => crypto.subtle.digest('SHA-256', encoder.encode(key))))
+  const x = new Uint8Array(a)
+  const y = new Uint8Array(b)
+  let diff = 0
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i]
+  return diff === 0
+}
+
+/** The plan this request runs on: the developer key wins, otherwise the install's plan. */
+async function planOf(who: Identity, request: Request, env: Env, deps: Deps): Promise<Plan> {
+  return (await hasDevKey(request, env)) ? 'dev' : resolvePlan(who.id, env, deps)
+}
+
 /** Counters spent synchronously on every request; separate Durable Objects, called in parallel. */
 function requestCounters(who: Identity, request: Request, env: Env): Array<[string, number]> {
   const counters: Array<[string, number]> = [
@@ -353,7 +378,7 @@ const GLOBAL_EXHAUSTED_MESSAGE = 'The service has reached its daily limit'
 async function handleEntitlement(request: Request, env: Env, deps: Deps): Promise<Response> {
   const who = await identify(request, env)
   if (!who) return fail(401, 'unauthorized', 'Missing or invalid install token')
-  const plan = await resolvePlan(who.id, env, deps)
+  const plan = await planOf(who, request, env, deps)
   const quota = UNLIMITED_PLANS.has(plan) ? null : quotaMeta(await deps.quota.peek(installCounter(who.id), limitOf(env.INSTALL_DAILY_CHARS, 100_000)))
   return ok({ plan, features: PLAN_FEATURES[plan], models: PLAN_MODELS[plan], quota })
 }
@@ -525,7 +550,7 @@ async function handleTranslate(request: Request, env: Env, deps: Deps): Promise<
   const started = Date.now()
   const who = await identify(request, env)
   if (!who) return fail(401, 'unauthorized', 'Missing or invalid install token')
-  const plan = await resolvePlan(who.id, env, deps)
+  const plan = await planOf(who, request, env, deps)
   if (!PLAN_FEATURES[plan].includes('cloud-ai')) return fail(402, 'upgrade_required', 'Cloud AI requires an upgrade')
 
   const maxRequestChars = limitOf(env.MAX_REQUEST_CHARS, 24_000)

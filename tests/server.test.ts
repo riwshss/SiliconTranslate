@@ -438,6 +438,35 @@ describe('developer plan', () => {
     expect(await other.json()).toMatchObject({ data: { plan: 'beta' } })
   })
 
+  const DEV_KEY = 'k'.repeat(43)
+  const keyEnv = { ...env, DEV_KEY }
+  const entitlementWith = async (deps: Deps, environment: Env, headers: Record<string, string>) =>
+    (await handleRequest(new Request('https://api.test/v1/entitlement', { headers: { 'X-Silk-Install': TOKEN, ...headers } }), environment, deps)).json()
+
+  it('is granted to any install that sends the developer key', async () => {
+    const { deps } = setup()
+    expect(await entitlementWith(deps, keyEnv, { 'X-Silk-Dev-Key': DEV_KEY })).toMatchObject({ data: { plan: 'dev', models: MODELS, quota: null } })
+    expect(await entitlementWith(deps, keyEnv, { 'X-Silk-Dev-Key': `${DEV_KEY}x` })).toMatchObject({ data: { plan: 'beta' } })
+    expect(await entitlementWith(deps, keyEnv, {})).toMatchObject({ data: { plan: 'beta' } })
+  })
+
+  it('translates with any model and without quota when the developer key is sent', async () => {
+    const { deps, settle, quota } = setup()
+    const res = await handleRequest(translateReq(['hello'], { model: MODELS[1] }, { 'X-Silk-Dev-Key': DEV_KEY }), keyEnv, deps)
+    expect(res.status).toBe(200)
+    await eventsOf(res, settle)
+    expect(quota.states.get(`v2:install:${INSTALL}`)).toBeUndefined()
+    const locked = await handleRequest(translateReq(['hello'], { model: MODELS[1] }), keyEnv, deps)
+    expect(locked.status).toBe(403)
+  })
+
+  it('ignores the developer key when the server has none or only a short one', async () => {
+    const { deps } = setup()
+    for (const environment of [env, { ...env, DEV_KEY: 'short' }]) {
+      expect(await entitlementWith(deps, environment, { 'X-Silk-Dev-Key': 'short' })).toMatchObject({ data: { plan: 'beta' } })
+    }
+  })
+
   it('can use any model, has no daily limit and is not stopped by the global guard', async () => {
     const { deps, fetchMock, settle, quota, points } = setup()
     for (const model of MODELS) {

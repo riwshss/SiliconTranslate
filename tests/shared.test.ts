@@ -4,6 +4,7 @@ import { CLOUD_MODELS, DEFAULT_SETTINGS, dropLegacySettings, engineId, MAX_CONCU
 import { eventToShortcut, isValidShortcut, matchesShortcut } from '../src/shared/shortcut'
 import { chineseTargetFor, defaultTargetLang, getLanguage } from '../src/shared/languages'
 import { contentScriptMatches, sitePattern } from '../src/shared/site-access'
+import { sanitizeDevKey } from '../src/shared/dev-key'
 
 const key = (code: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}) => ({
   code,
@@ -211,5 +212,21 @@ describe('site access', () => {
     const origins = ['https://*/*', 'http://*/*', 'https://news.example/*', 'https://api.silk.dev/*', 'chrome://favicon/*']
     expect(contentScriptMatches(origins, 'https://api.silk.dev')).toEqual(['https://*/*', 'http://*/*', 'https://news.example/*'])
     expect(contentScriptMatches(['https://api.silk.dev/*'], 'https://api.silk.dev')).toEqual([])
+  })
+})
+
+describe('developer key', () => {
+  it('keeps a pasted key without the surrounding whitespace', () => {
+    const key = 'Ab3-_+/='.repeat(5) + 'xyz'
+    expect(sanitizeDevKey(`  ${key}\n`)).toBe(key)
+  })
+
+  it('rejects anything that cannot be a key or a safe header value', () => {
+    expect(sanitizeDevKey('short')).toBeNull()
+    expect(sanitizeDevKey('k'.repeat(257))).toBeNull()
+    expect(sanitizeDevKey(`${'k'.repeat(40)}\r\nX-Evil: 1`)).toBeNull()
+    expect(sanitizeDevKey(`${'k'.repeat(20)} ${'k'.repeat(20)}`)).toBeNull()
+    expect(sanitizeDevKey(undefined)).toBeNull()
+    expect(sanitizeDevKey(42)).toBeNull()
   })
 })
