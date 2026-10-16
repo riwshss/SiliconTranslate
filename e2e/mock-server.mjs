@@ -1,5 +1,6 @@
-// Fake SiliconFlow (OpenAI-compatible) endpoint for E2E: streams deterministic "translations",
-// answers the first batch with 429 to exercise backoff, and records concurrency.
+// Fake OpenAI-compatible endpoint for E2E: streams deterministic "translations", answers the first
+// batch with 429 to exercise backoff, and records concurrency. Requests carrying X-Silk-Install
+// play the Silk backend (cloud engine): no API key, /v1/entitlement, and a switchable quota.
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 
@@ -8,6 +9,10 @@ const CHUNK = 9
 const CHUNK_DELAY_MS = 12
 
 export const stats = { batchRequests: 0, items: 0, textRequests: 0, rateLimited: 0, active: 0, peak: 0, keys: new Set() }
+/** Silk backend side: requests seen, install ids, and a switch that makes every request over quota. */
+export const cloud = { requests: 0, quotaHits: 0, installIds: new Set(), withAuthorization: 0, isQuotaExhausted: false }
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const JSON_CORS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
 
 /** "Click <g0>this guide</g0> now" → "译·Click <g0>译·this guide</g0> 译·now" (frozen <cN> content kept). */
 export function fakeTranslate(markup) {
@@ -47,9 +52,37 @@ function readBody(req) {
   })
 }
 
+/** Silk backend auth: valid install id, no API key. Returns false once it has answered the request. */
+function acceptCloud(req, res) {
+  const id = req.headers['x-silk-install']
+  if (!UUID_RE.test(id ?? '')) {
+    res.writeHead(401, { ...JSON_CORS, 'X-Silk-Error': 'unauthorized' })
+    res.end(JSON.stringify({ success: false, data: null, error: { code: 'unauthorized', message: 'bad install id' } }))
+    return false
+  }
+  cloud.installIds.add(id)
+  if (req.headers.authorization) cloud.withAuthorization++
+  return true
+}
+
+function handleEntitlement(req, res) {
+  if (!acceptCloud(req, res)) return
+  const quota = { used: cloud.isQuotaExhausted ? 200000 : 1234, limit: 200000, resetAt: '2026-10-18T00:00:00.000Z' }
+  res.writeHead(200, JSON_CORS)
+  res.end(JSON.stringify({ success: true, data: { plan: 'beta', features: ['cloud-ai'], quota }, error: null, meta: null }))
+}
+
 async function handleChat(req, res) {
   const body = JSON.parse(await readBody(req))
-  if (req.headers.authorization !== 'Bearer sk-test') {
+  if (req.headers['x-silk-install']) {
+    if (!acceptCloud(req, res)) return
+    cloud.requests++
+    if (cloud.isQuotaExhausted) {
+      cloud.quotaHits++
+      res.writeHead(429, { ...JSON_CORS, 'X-Silk-Error': 'quota_exceeded' })
+      return res.end(JSON.stringify({ success: false, data: null, error: { code: 'quota_exceeded', message: 'Daily free quota used up' } }))
+    }
+  } else if (req.headers.authorization !== 'Bearer sk-test') {
     res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
     return res.end(JSON.stringify({ message: 'Invalid token' }))
   }
@@ -82,12 +115,13 @@ async function handleChat(req, res) {
   }
 }
 
-export function startMockServer() {
+/** Port 0 picks a free one; the cloud engine needs a fixed port baked into the E2E build. */
+export function startMockServer(port = 0) {
   const server = createServer((req, res) => {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, content-type',
+        'Access-Control-Allow-Headers': 'authorization, content-type, x-silk-install',
         'Access-Control-Allow-Methods': 'GET, POST',
       })
       return res.end()
@@ -96,6 +130,7 @@ export function startMockServer() {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       return res.end(FIXTURE)
     }
+    if (req.url === '/v1/entitlement' && req.method === 'GET') return handleEntitlement(req, res)
     if (req.url.startsWith('/v1/models')) {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
       return res.end(JSON.stringify({ data: [{ id: 'mock/model-a' }, { id: 'mock/model-b' }] }))
@@ -110,5 +145,8 @@ export function startMockServer() {
     res.writeHead(404)
     res.end()
   })
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)))
+  return new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, '127.0.0.1', () => resolve(server))
+  })
 }

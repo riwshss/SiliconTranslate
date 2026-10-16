@@ -8,6 +8,7 @@ import { isLikelyInLanguage } from '../core/text-filter'
 import { getLanguage, type Language } from '../shared/languages'
 import type { ErrorCode } from '../shared/messages'
 import { engineId, isChromeAiProvider, type Settings } from '../shared/settings'
+import { assertCanUse, cloudApiConfig } from './account'
 import { onRateLimited, streamChat, type ApiConfig } from './api'
 import { runChromeAi } from './chrome-ai'
 import { googleTranslate } from './google'
@@ -34,7 +35,12 @@ function recoverConcurrency(): void {
   if (pool.capacity < configuredConcurrency) pool.setLimit(pool.capacity + 1)
 }
 
-function apiConfig(settings: Settings): ApiConfig {
+/** Chat-completions endpoint for the LLM engines: the Silk backend (`cloud`) or the user's own. */
+async function chatConfig(settings: Settings): Promise<ApiConfig> {
+  if (settings.provider === 'cloud') {
+    await assertCanUse('cloud')
+    return cloudApiConfig()
+  }
   if (!settings.apiKey) throw new ApiError('no-key')
   return { apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model }
 }
@@ -63,7 +69,7 @@ export function plainReply(reply: string): string | null {
 /** Translates `group` (markup strings) and reports each finished item by its index in `group`. */
 type GroupTranslator = (group: string[], deliver: (local: number, text: string) => void, signal: AbortSignal) => Promise<void>
 
-function groupTranslator(settings: Settings, context: string): GroupTranslator {
+async function groupTranslator(settings: Settings, context: string): Promise<GroupTranslator> {
   const { provider } = settings
   if (provider === 'google') {
     const key = googleKey(settings)
@@ -76,7 +82,7 @@ function groupTranslator(settings: Settings, context: string): GroupTranslator {
     return (group, deliver, signal) =>
       runChromeAi({ kind: 'batch', provider, texts: group, targetLang: settings.targetLang }, (event) => event.type === 'item' && deliver(event.index, event.text), signal)
   }
-  const cfg = apiConfig(settings)
+  const cfg = await chatConfig(settings)
   const language = getLanguage(settings.targetLang).prompt
   return async (group, deliver, signal) => {
     const parser = createObjectStreamParser()
@@ -98,7 +104,7 @@ function groupTranslator(settings: Settings, context: string): GroupTranslator {
 }
 
 /** Errors a second attempt cannot fix. */
-const FINAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['no-key', 'auth', 'bad-request', 'unavailable', 'model-download', 'aborted', 'extension'])
+const FINAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['no-key', 'quota', 'upgrade', 'auth', 'bad-request', 'unavailable', 'model-download', 'aborted', 'extension'])
 
 const SUSPECT_MIN_SOURCE = 40
 const SUSPECT_RATIO = 0.1
@@ -127,7 +133,7 @@ export async function translateBatch(
   onItem: (index: number, text: string) => void,
   signal: AbortSignal,
 ): Promise<BatchOutcome> {
-  const translate = groupTranslator(settings, context)
+  const translate = await groupTranslator(settings, context)
   const checkLength = !['google', 'chrome-translator'].includes(settings.provider)
   const results: Array<string | undefined> = texts.map((text) => cache.get(cacheKey(settings, text)))
   results.forEach((text, i) => text !== undefined && onItem(i, text))
@@ -202,7 +208,7 @@ export async function streamTextTranslation(
   } else if (isChromeAiProvider(provider)) {
     job = () => runChromeAi({ kind: 'text', provider, text, targetLang: language.code }, (event) => event.type === 'delta' && onDelta(event.text), signal)
   } else {
-    const cfg = apiConfig(settings)
+    const cfg = await chatConfig(settings)
     job = async () => {
       for await (const delta of streamChat(cfg, buildTextMessages(text, language.prompt), { signal })) onDelta(delta)
     }

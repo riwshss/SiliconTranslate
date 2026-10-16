@@ -5,3 +5,5 @@ e2e/output/
 *.zip
 release/
 silk-translate-v*/
+.dev.vars
+.wrangler/

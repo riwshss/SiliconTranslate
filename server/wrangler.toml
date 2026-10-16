@@ -1,0 +1,28 @@
+name = "silk-translate-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Any OpenRouter model id: https://openrouter.ai/models
+OPENROUTER_MODEL = "google/gemini-2.5-flash-lite"
+# Daily limits, counted in prompt characters, reset at UTC midnight.
+INSTALL_DAILY_CHARS = "200000"
+IP_DAILY_CHARS = "600000"
+# Wallet guard across all users; raise as the beta grows.
+GLOBAL_DAILY_CHARS = "20000000"
+# Single request ceilings.
+MAX_REQUEST_CHARS = "24000"
+MAX_OUTPUT_TOKENS = "8192"
+# Shown to OpenRouter for app attribution.
+APP_URL = "https://github.com/riwshss/SiliconTranslate"
+APP_TITLE = "Silk Translate"
+
+# Secret, never committed: npx wrangler secret put OPENROUTER_API_KEY
+
+[[durable_objects.bindings]]
+name = "QUOTA"
+class_name = "QuotaCounter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["QuotaCounter"]

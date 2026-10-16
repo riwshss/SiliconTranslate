@@ -60,7 +60,7 @@ describe('sanitizeSettings', () => {
       model: '   ',
       provider: 'bing',
     })
-    expect(result.provider).toBe('openai')
+    expect(result.provider).toBe('cloud')
     expect(result.baseUrl).toBe(DEFAULT_SETTINGS.baseUrl)
     expect(result.targetLang).toBe('zh-CN')
     expect(result.defaultMode).toBe('overlay')
@@ -85,7 +85,8 @@ describe('sanitizeSettings', () => {
   })
 
   it('engineId separates cached translations per engine and model', () => {
-    expect(engineId(DEFAULT_SETTINGS)).toBe(`openai:${DEFAULT_SETTINGS.model}`)
+    expect(engineId(DEFAULT_SETTINGS)).toBe('cloud')
+    expect(engineId({ ...DEFAULT_SETTINGS, provider: 'openai' })).toBe(`openai:${DEFAULT_SETTINGS.model}`)
     expect(engineId({ ...DEFAULT_SETTINGS, provider: 'google', model: 'x' })).toBe('google')
     expect(engineId({ ...DEFAULT_SETTINGS, provider: 'chrome-nano' })).toBe('chrome-nano')
   })

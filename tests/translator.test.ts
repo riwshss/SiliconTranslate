@@ -1,17 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../src/core/errors'
 import type { ChatMessage } from '../src/core/prompt'
+import type { ApiConfig } from '../src/background/api'
 import { DEFAULT_SETTINGS, type Settings } from '../src/shared/settings'
 
 /** Each call to the fake model gets the parsed batch ({"0": "…"}) and returns its reply chunks or throws. */
 let model: (batch: Record<string, string>, call: number) => string[]
 let calls: Array<Record<string, string>> = []
+let configs: ApiConfig[] = []
 
 vi.mock('../src/background/api', () => ({
   onRateLimited: () => undefined,
-  streamChat: async function* (_cfg: unknown, messages: ChatMessage[]) {
+  streamChat: async function* (cfg: ApiConfig, messages: ChatMessage[]) {
     const batch = JSON.parse(messages[1].content) as Record<string, string>
     calls.push(batch)
+    configs.push(cfg)
     yield* model(batch, calls.length)
   },
 }))
@@ -20,11 +23,11 @@ const { translateBatch, plainReply, looksTruncated } = await import('../src/back
 
 let settingsId = 0
 /** A fresh model name per test keeps the module-level translation cache from leaking between tests. */
-const settings = (): Settings => ({ ...DEFAULT_SETTINGS, apiKey: 'sk-test', model: `test/model-${++settingsId}` })
+const settings = (): Settings => ({ ...DEFAULT_SETTINGS, provider: 'openai', apiKey: 'sk-test', model: `test/model-${++settingsId}` })
 
-async function translate(texts: string[]) {
+async function translate(texts: string[], withSettings: Settings = settings()) {
   const items: Record<number, string> = {}
-  const outcome = await translateBatch(settings(), texts, '', (i, text) => (items[i] = text), new AbortController().signal)
+  const outcome = await translateBatch(withSettings, texts, '', (i, text) => (items[i] = text), new AbortController().signal)
   return { items, outcome }
 }
 
@@ -33,6 +36,7 @@ const json = (batch: Record<string, string>, fn: (text: string) => string) =>
 
 beforeEach(() => {
   calls = []
+  configs = []
 })
 
 describe('translateBatch retries', () => {
@@ -103,5 +107,53 @@ describe('translator helpers', () => {
     expect(looksTruncated('short text', '短')).toBe(false)
     expect(looksTruncated('x'.repeat(100), '这是一个正常长度的翻译结果')).toBe(false)
     expect(looksTruncated('x'.repeat(100), '他说')).toBe(true)
+  })
+})
+
+describe('Silk AI cloud engine', () => {
+  let store: Record<string, unknown>
+  /** Fresh text per test: cloud translations share one cache key prefix ("cloud"). */
+  let textId = 0
+  const cloudText = () => `cloud text ${++textId}`
+
+  beforeEach(() => {
+    store = {}
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: async (key: string) => (key in store ? { [key]: store[key] } : {}),
+          set: async (items: Record<string, unknown>) => Object.assign(store, items),
+        },
+      },
+    })
+  })
+
+  it('calls the Silk backend with an anonymous install id instead of an API key', async () => {
+    model = (batch) => [json(batch, (t) => `译:${t}`)]
+    const text = cloudText()
+    const { items } = await translate([text], { ...DEFAULT_SETTINGS, provider: 'cloud' })
+    expect(items).toEqual({ 0: `译:${text}` })
+    expect(configs[0].apiKey).toBe('')
+    expect(configs[0].baseUrl).toMatch(/\/v1$/)
+    expect(configs[0].headers?.['X-Silk-Install']).toMatch(/^[0-9a-f-]{36}$/)
+    expect(store.installId).toBe(configs[0].headers?.['X-Silk-Install'])
+  })
+
+  it('treats a used-up daily quota as final: no per-item retries', async () => {
+    model = () => {
+      throw new ApiError('quota')
+    }
+    const { outcome } = await translate([cloudText(), cloudText()], { ...DEFAULT_SETTINGS, provider: 'cloud' })
+    expect(outcome.failed).toEqual([0, 1])
+    expect(outcome.error?.code).toBe('quota')
+    expect(calls).toHaveLength(1)
+  })
+
+  it('stops before any request when the cached plan does not include cloud AI', async () => {
+    store.entitlement = { plan: 'free', features: [], quota: null }
+    model = (batch) => [json(batch, (t) => t)]
+    // Like a missing key, a missing plan is a setup error: it rejects and the port reports every item failed.
+    await expect(translate([cloudText()], { ...DEFAULT_SETTINGS, provider: 'cloud' })).rejects.toMatchObject({ code: 'upgrade' })
+    expect(calls).toHaveLength(0)
   })
 })
