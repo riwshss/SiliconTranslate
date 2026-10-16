@@ -70,6 +70,7 @@ Cloudflare Worker，作用是**把 OpenRouter 的 Key 留在服务器上**（写
   - 每个安装：`INSTALL_DAILY_CHARS`（默认 10 万字，与正式版免费档准备给的水平一致）
   - 每个 IP：`IP_DAILY_CHARS`（默认 30 万字）
   - 全站：`GLOBAL_DAILY_CHARS`（默认 2 亿字，钱包保护）。拆成 16 个分片计数（每片上限是总数的 1/16），每次随机选一片，**在响应返回后**用 `ctx.waitUntil` 异步扣，不阻塞请求；任何一片报告超额，这个 Worker 实例当天剩下的时间里拒绝新请求。安装和 IP 两层仍然同步扣（两个 DO 并行调用）。
+  - **手动刷新当天额度：** 把 `QUOTA_EPOCH`（每日计数器的键前缀）改成一个新值再 `npx wrangler deploy`，所有安装、IP、旧版共用池的额度和安装令牌签发次数立刻从零开始；全站钱包保护不受影响。
 - **共享翻译缓存：** 每一段的译文按 `sha256(模型|目标语言|kind|原文)` 存进 Cloudflare 缓存（`caches.default`，7 天）。请求进来先逐段查缓存，命中的段落立刻流式返回、不扣额度，只把没命中的发给 OpenRouter。看起来被截断或丢了格式标记的译文不进缓存。⚠️ `caches.default` 只在挂了自定义域名的 Worker 上可靠生效，`*.workers.dev` 上可能是空操作，上线后请用指标里的 `cacheHits` 确认。
 - **响应格式：** `text/event-stream`，每行一个事件：`{"index":0,"text":"…"}`（整页，一段译完一行）、`{"delta":"…"}`（划词，流式片段）、`{"error":{"code","message"}}`，最后是 `[DONE]`。没有缓存命中时，上游失败直接返回 HTTP 错误（`502 upstream_error`，扩展会自动重试）；已经先发了缓存段落时，上游失败以 `error` 事件结束，只退还没送达段落的额度。
 - 模型由客户端在请求的 `model` 字段中指定。`server/src/app.ts` 的 `MODELS` 是全部已知模型（与扩展的 `CLOUD_MODELS` 一致），未知模型返回 `400`；`PLAN_MODELS` 决定每个套餐能用哪些：测试版只有 `deepseek/deepseek-v4-flash`，`pro` 全部可用。请求套餐外的模型返回 `403` 并带 `X-Silk-Error: model_locked`，不扣额度；不传模型时用套餐的第一个。

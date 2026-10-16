@@ -13,6 +13,9 @@ INSTALL_DAILY_CHARS = "100000"
 IP_DAILY_CHARS = "300000"
 # Wallet guard across all users, split over 16 counters; raise as the beta grows.
 GLOBAL_DAILY_CHARS = "200000000"
+# Change to any new value and deploy to give everyone a fresh day: per-install, per-IP and legacy
+# quotas and the install-token count start from zero (the global wallet guard keeps counting).
+QUOTA_EPOCH = "v3"
 # New install tokens per client IP per day (POST /v1/install).
 INSTALLS_PER_IP_DAILY = "3"
 # Transition for extension <= 2.2 (unsigned install ids, /v1/chat/completions): everything it
