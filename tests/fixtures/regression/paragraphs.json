@@ -1,0 +1,745 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "vocab-video",
+      "category": "vocab",
+      "source": "Watch the video tutorial to learn the basics in ten minutes.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "影片"
+          ],
+          "mustNot": [
+            "視頻"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "影片"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-software",
+      "category": "vocab",
+      "source": "Make sure your software is up to date before you report a bug.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "軟體"
+          ],
+          "mustNot": [
+            "軟件"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "軟件"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-program",
+      "category": "vocab",
+      "source": "The program crashes when the input file is empty.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "程式"
+          ],
+          "mustNot": [
+            "程序"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "程式"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-network",
+      "category": "vocab",
+      "source": "Check your network connection and try again.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "網路"
+          ],
+          "mustNot": [
+            "網絡"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "網絡"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-quality",
+      "category": "vocab",
+      "source": "We never compromise on quality, even when deadlines are tight.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "品質"
+          ],
+          "mustNot": [
+            "質量"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "質素"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-data",
+      "category": "vocab",
+      "source": "All of your data is stored on your own device.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "資料"
+          ],
+          "mustNot": [
+            "數據"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-server",
+      "category": "vocab",
+      "source": "The server returned an unexpected response.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "伺服器"
+          ],
+          "mustNot": [
+            "服務器"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "伺服器"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-default",
+      "category": "vocab",
+      "source": "You can change the default language in the settings.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "預設",
+            "設定"
+          ],
+          "mustNot": [
+            "默認",
+            "設置"
+          ]
+        },
+        "zh-HK": {
+          "mustNot": [
+            "默認"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-file",
+      "category": "vocab",
+      "source": "Drag a file here to upload it.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "檔案"
+          ],
+          "mustNot": [
+            "文件"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "檔案"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-user",
+      "category": "vocab",
+      "source": "Each user can create up to five projects for free.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "使用者",
+            "專案"
+          ],
+          "mustNot": [
+            "用戶",
+            "項目"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-memory",
+      "category": "vocab",
+      "source": "This app uses less memory than the previous version.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "記憶體"
+          ],
+          "mustNot": [
+            "內存"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "記憶體"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-support",
+      "category": "vocab",
+      "source": "This browser does not support the feature yet.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "支援"
+          ],
+          "mustNot": [
+            "支持"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "支援"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-information",
+      "category": "vocab",
+      "source": "For more information, contact our support team.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "資訊"
+          ],
+          "mustNot": [
+            "信息"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "資訊"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-link",
+      "category": "vocab",
+      "source": "Click the link in the email to log in to your account.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "連結",
+            "登入",
+            "帳"
+          ],
+          "mustNot": [
+            "鏈接",
+            "登錄",
+            "賬"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "連結",
+            "登入"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-interface",
+      "category": "vocab",
+      "source": "The new interface is cleaner and easier to navigate.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "介面"
+          ],
+          "mustNot": [
+            "界面"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "介面"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-print",
+      "category": "vocab",
+      "source": "Print the page or save it as a PDF.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "列印"
+          ],
+          "mustNot": [
+            "打印"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "打印"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-mouse",
+      "category": "vocab",
+      "source": "Hold the mouse button and drag to select several items.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "滑鼠"
+          ],
+          "mustNot": [
+            "鼠標"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "滑鼠"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-online",
+      "category": "vocab",
+      "source": "The online course includes digital certificates.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "線上",
+            "數位"
+          ],
+          "mustNot": [
+            "在線",
+            "數字"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "網上",
+            "數碼"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-hard-drive",
+      "category": "vocab",
+      "source": "Back up your hard drive before installing the update.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "硬碟"
+          ],
+          "mustNot": [
+            "硬盤"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "硬碟"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-text-message",
+      "category": "vocab",
+      "source": "We will send a verification code by text message.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "簡訊"
+          ],
+          "mustNot": [
+            "短信"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "短訊"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-taxi",
+      "category": "vocab",
+      "source": "It takes about twenty minutes by taxi or forty minutes by bus.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "計程車",
+            "公車"
+          ],
+          "mustNot": [
+            "出租車"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "的士",
+            "巴士"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-pineapple",
+      "category": "vocab",
+      "source": "Pineapple and potato are both on the shopping list.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "鳳梨",
+            "馬鈴薯"
+          ],
+          "mustNot": [
+            "菠蘿",
+            "土豆"
+          ]
+        },
+        "zh-HK": {
+          "must": [
+            "菠蘿"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-laptop",
+      "category": "vocab",
+      "source": "My laptop battery lasts about six hours.",
+      "expect": {
+        "zh-TW": {
+          "mustNot": [
+            "筆記本"
+          ]
+        },
+        "zh-HK": {
+          "mustNot": [
+            "筆記本電腦"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vocab-optimize",
+      "category": "vocab",
+      "source": "We optimized the database queries to reduce latency.",
+      "expect": {
+        "zh-TW": {
+          "must": [
+            "資料庫"
+          ],
+          "mustNot": [
+            "數據庫"
+          ]
+        }
+      }
+    },
+    {
+      "id": "markup-link",
+      "category": "markup",
+      "source": "Read <g0>the installation guide</g0> before you start."
+    },
+    {
+      "id": "markup-bold-link",
+      "category": "markup",
+      "source": "Press <g0>Save</g0> to keep your changes, or <g1>discard them</g1>."
+    },
+    {
+      "id": "markup-nested",
+      "category": "markup",
+      "source": "See <g0>the <g1>official</g1> documentation</g0> for details."
+    },
+    {
+      "id": "markup-code",
+      "category": "markup",
+      "source": "Run <c0>npm install</c0> and then <c1>npm run build</c1> to compile the project.",
+      "keep": [
+        "npm install",
+        "npm run build"
+      ]
+    },
+    {
+      "id": "markup-reorder",
+      "category": "markup",
+      "source": "Only <g0>administrators</g0> can delete <g1>shared folders</g1>.",
+      "note": "Chinese word order may move the markers; they must all survive."
+    },
+    {
+      "id": "markup-break",
+      "category": "markup",
+      "source": "First line<c0/>Second line after a line break."
+    },
+    {
+      "id": "markup-quote",
+      "category": "markup",
+      "source": "The error says \"<g0>permission denied</g0>\" when the folder is read-only."
+    },
+    {
+      "id": "markup-many",
+      "category": "markup",
+      "source": "<g0>Home</g0> · <g1>Pricing</g1> · <g2>Docs</g2> · <g3>Blog</g3>"
+    },
+    {
+      "id": "markup-entities",
+      "category": "markup",
+      "source": "Use &lt;div&gt; for layout &amp; <c0>&lt;span&gt;</c0> for inline text.",
+      "keep": [
+        "<span>"
+      ]
+    },
+    {
+      "id": "markup-image",
+      "category": "markup",
+      "source": "Click the gear icon <c0/> in the top right corner."
+    },
+    {
+      "id": "dev-hook",
+      "category": "dev",
+      "source": "The <c0>useEffect</c0> hook runs after every render unless you pass a dependency array.",
+      "keep": [
+        "useEffect"
+      ]
+    },
+    {
+      "id": "dev-promise",
+      "category": "dev",
+      "source": "An async function always returns a Promise, even if you return a plain value.",
+      "keep": [
+        "Promise"
+      ]
+    },
+    {
+      "id": "dev-git",
+      "category": "dev",
+      "source": "Rebase your branch onto main before opening a pull request, and squash fixup commits.",
+      "note": "Terms like rebase / pull request are often kept in English by Taiwanese developers."
+    },
+    {
+      "id": "dev-cli-flag",
+      "category": "dev",
+      "source": "Pass <c0>--dry-run</c0> to see what would change without writing anything.",
+      "keep": [
+        "--dry-run"
+      ]
+    },
+    {
+      "id": "dev-env",
+      "category": "dev",
+      "source": "Set <c0>NODE_ENV</c0> to <c1>production</c1> to enable minification.",
+      "keep": [
+        "NODE_ENV",
+        "production"
+      ]
+    },
+    {
+      "id": "dev-http",
+      "category": "dev",
+      "source": "The endpoint returns 429 Too Many Requests when you exceed the rate limit.",
+      "keep": [
+        "429"
+      ]
+    },
+    {
+      "id": "dev-api-name",
+      "category": "dev",
+      "source": "Call <c0>fetch()</c0> with <c1>{ signal }</c1> so the request can be aborted.",
+      "keep": [
+        "fetch()",
+        "{ signal }"
+      ]
+    },
+    {
+      "id": "dev-stack",
+      "category": "dev",
+      "source": "If you see \"Cannot read properties of undefined\", check that the object exists before accessing it."
+    },
+    {
+      "id": "dev-docker",
+      "category": "dev",
+      "source": "Mount the volume read-only and expose port 8080 only on localhost.",
+      "keep": [
+        "8080",
+        "localhost"
+      ]
+    },
+    {
+      "id": "dev-ts",
+      "category": "dev",
+      "source": "TypeScript narrows the type inside the if block, so you no longer need a type assertion.",
+      "keep": [
+        "TypeScript"
+      ]
+    },
+    {
+      "id": "dev-sql",
+      "category": "dev",
+      "source": "Add an index on the <c0>created_at</c0> column to speed up range queries.",
+      "keep": [
+        "created_at"
+      ]
+    },
+    {
+      "id": "dev-deprecation",
+      "category": "dev",
+      "source": "This option is deprecated and will be removed in the next major version."
+    },
+    {
+      "id": "dev-readme",
+      "category": "dev",
+      "source": "Contributions are welcome! Please open an issue first to discuss what you would like to change."
+    },
+    {
+      "id": "dev-so-answer",
+      "category": "dev",
+      "source": "This works because closures capture variables by reference, not by value."
+    },
+    {
+      "id": "dev-version",
+      "category": "dev",
+      "source": "Requires Node.js 22 or later; earlier versions are not supported.",
+      "keep": [
+        "Node.js",
+        "22"
+      ]
+    },
+    {
+      "id": "dev-brand",
+      "category": "dev",
+      "source": "Deploy to Cloudflare Workers with Wrangler, or to Vercel with one click.",
+      "keep": [
+        "Cloudflare Workers",
+        "Wrangler",
+        "Vercel"
+      ]
+    },
+    {
+      "id": "long-legal",
+      "category": "long",
+      "source": "By continuing to use the service after the changes take effect, you agree to be bound by the revised terms, except where applicable law requires your explicit consent."
+    },
+    {
+      "id": "long-science",
+      "category": "long",
+      "source": "Although the results are promising, the authors caution that the sample size was small and that the effect may not generalize to older populations or to people with chronic conditions."
+    },
+    {
+      "id": "long-news",
+      "category": "long",
+      "source": "The city council voted on Tuesday to extend the late-night bus service through the end of the year, citing a sharp rise in ridership among shift workers and students."
+    },
+    {
+      "id": "long-docs",
+      "category": "long",
+      "source": "When the cache is full, the least recently used entry is evicted first, which keeps frequently accessed items in memory while bounding the total size."
+    },
+    {
+      "id": "long-ux",
+      "category": "long",
+      "source": "If you close the window before the upload finishes, your progress is saved and the upload resumes automatically the next time you open the app."
+    },
+    {
+      "id": "long-idiom",
+      "category": "long",
+      "source": "It's not rocket science, but getting the details right takes more time than you'd think."
+    },
+    {
+      "id": "long-question",
+      "category": "long",
+      "source": "Have you ever wondered why some websites load instantly while others take ages, even on the same connection?"
+    },
+    {
+      "id": "long-list",
+      "category": "long",
+      "source": "You will need a valid ID, proof of address dated within the last three months, and a recent photo."
+    },
+    {
+      "id": "ui-button",
+      "category": "ui",
+      "source": "Get started"
+    },
+    {
+      "id": "ui-cookie",
+      "category": "ui",
+      "source": "We use cookies to improve your experience."
+    },
+    {
+      "id": "ui-empty",
+      "category": "ui",
+      "source": "No results found. Try a different keyword."
+    },
+    {
+      "id": "ui-error",
+      "category": "ui",
+      "source": "Something went wrong. Please try again later."
+    },
+    {
+      "id": "ui-date",
+      "category": "ui",
+      "source": "Last updated on March 3, 2026",
+      "keep": [
+        "2026"
+      ]
+    },
+    {
+      "id": "ui-price",
+      "category": "ui",
+      "source": "Only $4.99 per month, cancel anytime.",
+      "keep": [
+        "4.99"
+      ]
+    },
+    {
+      "id": "ui-emoji",
+      "category": "ui",
+      "source": "Thanks for your feedback! 🎉",
+      "keep": [
+        "🎉"
+      ]
+    }
+  ]
+}

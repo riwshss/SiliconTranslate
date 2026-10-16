@@ -1,5 +1,5 @@
 import { UI_LANG_SETTINGS, type MessageKey, type UiLangSetting } from './i18n'
-import { isKnownLanguage } from './languages'
+import { defaultTargetLang, isKnownLanguage } from './languages'
 import { isValidShortcut } from './shortcut'
 
 export type DisplayMode = 'original' | 'overlay' | 'bilingual'
@@ -43,6 +43,7 @@ export function engineId(settings: Settings): string {
   return `cloud:${settings.model}`
 }
 
+/** Defaults; `targetLang` is replaced by the browser's Chinese variant (see defaultTargetLang) when nothing is stored. */
 export const DEFAULT_SETTINGS: Settings = {
   model: DEFAULT_MODEL,
   uiLang: 'auto',
@@ -79,7 +80,7 @@ export function sanitizeSettings(raw: unknown): Settings {
   return {
     model: pickEnum(src.model, MODEL_IDS, DEFAULT_MODEL),
     uiLang: pickEnum(src.uiLang, UI_LANG_SETTINGS, DEFAULT_SETTINGS.uiLang),
-    targetLang: isKnownLanguage(src.targetLang) ? src.targetLang : DEFAULT_SETTINGS.targetLang,
+    targetLang: isKnownLanguage(src.targetLang) ? src.targetLang : defaultTargetLang(),
     defaultMode: pickEnum(src.defaultMode, ['overlay', 'bilingual'] as const, 'overlay'),
     bilingualStyle: pickEnum(src.bilingualStyle, ['dashed', 'highlight'] as const, 'dashed'),
     shortcut: isValidShortcut(src.shortcut) ? src.shortcut : DEFAULT_SETTINGS.shortcut,

@@ -5,7 +5,8 @@ import { ConcurrencyPool } from '../src/core/pool'
 import { FIRST_BATCH_CHARS, FIRST_BATCH_ITEMS, MAX_BATCH_CHARS, MAX_BATCH_ITEMS, MIN_BATCH_CHARS, splitBatches } from '../src/core/batching'
 import { LruCache } from '../src/core/lru'
 import { guessLanguageByScript, isLikelyInLanguage, shouldTranslateText } from '../src/core/text-filter'
-import { BATCH_SYSTEM_PROMPT, buildBatchMessages } from '../src/core/prompt'
+import { BATCH_SYSTEM_PROMPT, buildBatchMessages, buildTextMessages, LOCALE_GUIDES } from '../src/core/prompt'
+import { getLanguage, LANGUAGES } from '../src/shared/languages'
 import { ApiError, toApiError } from '../src/core/errors'
 
 describe('createObjectStreamParser', () => {
@@ -225,12 +226,24 @@ describe('text filter', () => {
 
 describe('prompt', () => {
   it('keeps the system prompt fixed and puts language, page title and a keyed JSON object in the user message', () => {
-    const [system, user] = buildBatchMessages(['a', 'b'], 'Simplified Chinese', 'My Page')
+    const [system, user] = buildBatchMessages(['a', 'b'], getLanguage('zh-CN'), 'My Page')
     expect(system.content).toBe(BATCH_SYSTEM_PROMPT)
-    expect(buildBatchMessages(['c'], 'Japanese', '')[0].content).toBe(BATCH_SYSTEM_PROMPT)
+    for (const language of LANGUAGES) expect(buildBatchMessages(['c'], language, '')[0].content).toBe(BATCH_SYSTEM_PROMPT)
     const [head, payload] = user.content.split('\n\n')
-    expect(head).toBe('Target language: Simplified Chinese\nPage title: My Page')
+    expect(head).toBe('Target language: Simplified Chinese (简体中文)\nPage title: My Page')
     expect(JSON.parse(payload)).toEqual({ 0: 'a', 1: 'b' })
+  })
+
+  it('adds regional usage for Taiwan and Hong Kong in the user message only', () => {
+    const [, tw] = buildBatchMessages(['a'], getLanguage('zh-TW'), '')
+    expect(tw.content).toContain('Taiwan')
+    expect(tw.content).toContain(`Usage: ${LOCALE_GUIDES['zh-TW']}`)
+    expect(LOCALE_GUIDES['zh-TW']).toContain('影片 (not 視頻)')
+    const [, hk] = buildBatchMessages(['a'], getLanguage('zh-HK'), '')
+    expect(hk.content).toContain('Hong Kong')
+    expect(hk.content).toContain('書面語')
+    expect(buildBatchMessages(['a'], getLanguage('ja'), '')[1].content).not.toContain('Usage:')
+    expect(buildTextMessages('hi', getLanguage('zh-TW'))[0].content).toContain(LOCALE_GUIDES['zh-TW'])
   })
 })
 

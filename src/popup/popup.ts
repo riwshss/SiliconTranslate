@@ -321,12 +321,13 @@ async function runAccountCheck(): Promise<void> {
 /** Fills every static label; called again whenever the interface language changes. */
 function applyLanguage(): void {
   document.documentElement.lang = resolveUiLang(settings.uiLang)
+  document.title = resolveUiLang(settings.uiLang) === 'en' ? 'Silk Translate' : `${t('appName')} Silk Translate`
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => (el.textContent = t(el.dataset.i18n as MessageKey)))
   document.querySelectorAll<HTMLElement>('[data-i18n-aria]').forEach((el) => el.setAttribute('aria-label', t(el.dataset.i18nAria as MessageKey)))
   document.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle as MessageKey)))
   renderModels()
   const uiLang = $<HTMLSelectElement>('ui-lang')
-  const names: Record<UiLangSetting, string> = { auto: t('uiAuto'), 'zh-CN': '简体中文', en: 'English' }
+  const names: Record<UiLangSetting, string> = { auto: t('uiAuto'), 'zh-TW': '繁體中文', 'zh-CN': '简体中文', en: 'English' }
   uiLang.replaceChildren(...UI_LANG_SETTINGS.map((value) => new Option(names[value], value)))
   uiLang.value = settings.uiLang
   if (pageNote) $('page-note').textContent = t(pageNote)

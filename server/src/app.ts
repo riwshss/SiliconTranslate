@@ -5,7 +5,7 @@
 // texts to translate: prompts are built here, so the endpoint cannot be used as a general LLM.
 // The key never reaches the client.
 
-import { buildBatchMessages, buildTextMessages, type ChatMessage } from '../../src/core/prompt'
+import { buildBatchMessages, buildTextMessages, PROMPT_VERSION, type ChatMessage } from '../../src/core/prompt'
 import { isSuspectTranslation, plainReply } from '../../src/core/reply'
 import { createSseParser } from '../../src/core/sse'
 import { createObjectStreamParser } from '../../src/core/stream-json'
@@ -29,6 +29,11 @@ export interface Env {
   readonly LEGACY_DAILY_CHARS?: string
   /** Plan of an install without a stored one (see resolvePlan); "free" when unset. */
   readonly DEFAULT_PLAN?: string
+  /**
+   * Install ids (comma or whitespace separated) on the developer plan: every model, no quota.
+   * A wrangler secret, so the list never lands in the repository.
+   */
+  readonly DEV_INSTALL_IDS?: string
   readonly MAX_REQUEST_CHARS: string
   readonly MAX_OUTPUT_TOKENS: string
   /** Tokens/s (median) a provider should reach to be tried first; slower ones become fallbacks. */
@@ -69,9 +74,11 @@ export interface Deps {
   readonly metrics?: MetricsSink
 }
 
-export type Plan = 'beta' | 'free' | 'pro'
-const PLANS: readonly Plan[] = ['beta', 'free', 'pro']
-const PLAN_FEATURES: Record<Plan, readonly string[]> = { beta: ['cloud-ai'], free: [], pro: ['cloud-ai'] }
+export type Plan = 'beta' | 'free' | 'pro' | 'dev'
+const PLANS: readonly Plan[] = ['beta', 'free', 'pro', 'dev']
+const PLAN_FEATURES: Record<Plan, readonly string[]> = { beta: ['cloud-ai'], free: [], pro: ['cloud-ai'], dev: ['cloud-ai'] }
+/** Plans without daily limits: no per-install / per-IP quota, and the global guard does not stop them. */
+const UNLIMITED_PLANS: ReadonlySet<Plan> = new Set(['dev'])
 
 /** OpenRouter ids the extension may ask for; same list and order as CLOUD_MODELS in src/shared/settings.ts. */
 export const MODELS: readonly string[] = ['deepseek/deepseek-v4-flash', 'anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash']
@@ -80,7 +87,7 @@ export const MODELS: readonly string[] = ['deepseek/deepseek-v4-flash', 'anthrop
  * Models each plan may use; the first is the plan's default. The free beta only gets the
  * cheapest model, the others open with paid plans.
  */
-export const PLAN_MODELS: Record<Plan, readonly string[]> = { beta: ['deepseek/deepseek-v4-flash'], free: [], pro: MODELS }
+export const PLAN_MODELS: Record<Plan, readonly string[]> = { beta: ['deepseek/deepseek-v4-flash'], free: [], pro: MODELS, dev: MODELS }
 
 /** Model name extension v2.0 sent before models were selectable; it means "the plan default". */
 const LEGACY_MODEL = 'silk-cloud'
@@ -139,6 +146,7 @@ export type ErrorCode =
   | 'bad_request'
   | 'unauthorized'
   | 'quota_exceeded'
+  | 'install_limited'
   | 'upgrade_required'
   | 'model_locked'
   | 'not_found'
@@ -242,7 +250,7 @@ async function handleInstall(request: Request, env: Env, deps: Deps): Promise<Re
     return fail(500, 'server_error', 'Install signing is not configured')
   }
   const issued = await deps.quota.consume(`issue:${clientIp(request)}`, 1, limitOf(env.INSTALLS_PER_IP_DAILY, 3))
-  if (!issued.allowed) return fail(429, 'quota_exceeded', 'Too many new installs from this network today', quotaMeta(issued))
+  if (!issued.allowed) return fail(429, 'install_limited', 'Too many new installs from this network today', quotaMeta(issued))
   return ok({ token: await signInstallId(env.INSTALL_SECRET, crypto.randomUUID()) })
 }
 
@@ -252,11 +260,19 @@ function isPlan(value: unknown): value is Plan {
   return PLANS.includes(value as Plan)
 }
 
+function isDevInstall(id: string, env: Env): boolean {
+  return (env.DEV_INSTALL_IDS ?? '')
+    .split(/[\s,]+/)
+    .some((devId) => devId.toLowerCase() === id)
+}
+
 /**
- * The plan of an install: a stored one (written by the payment callback) wins, otherwise
- * DEFAULT_PLAN ("beta" during the beta), otherwise free.
+ * The plan of an install: the developer's own installs (DEV_INSTALL_IDS) first, then a stored
+ * plan (written by the payment callback), otherwise DEFAULT_PLAN ("beta" during the beta),
+ * otherwise free.
  */
 export async function resolvePlan(id: string, env: Env, deps: Deps): Promise<Plan> {
+  if (isDevInstall(id, env)) return 'dev'
   const stored = deps.plans ? await deps.plans.get(`plan:${id}`).catch(() => null) : null
   if (isPlan(stored)) return stored
   return isPlan(env.DEFAULT_PLAN) ? env.DEFAULT_PLAN : 'free'
@@ -330,8 +346,8 @@ async function handleEntitlement(request: Request, env: Env, deps: Deps): Promis
   const who = await identify(request, env)
   if (!who) return fail(401, 'unauthorized', 'Missing or invalid install token')
   const plan = await resolvePlan(who.id, env, deps)
-  const quota = await deps.quota.peek(`install:${who.id}`, limitOf(env.INSTALL_DAILY_CHARS, 100_000))
-  return ok({ plan, features: PLAN_FEATURES[plan], models: PLAN_MODELS[plan], quota: quotaMeta(quota) })
+  const quota = UNLIMITED_PLANS.has(plan) ? null : quotaMeta(await deps.quota.peek(`install:${who.id}`, limitOf(env.INSTALL_DAILY_CHARS, 100_000)))
+  return ok({ plan, features: PLAN_FEATURES[plan], models: PLAN_MODELS[plan], quota })
 }
 
 // ───────────────────────────── OpenRouter ─────────────────────────────
@@ -451,10 +467,14 @@ export interface TranslateRequest {
   readonly texts: readonly string[]
 }
 
+/** Everything a /v1/translate body may contain; anything else (e.g. `messages`, `system`) is refused. */
+const TRANSLATE_FIELDS = new Set(['model', 'target', 'title', 'kind', 'texts'])
+
 /** Validates the client body: data only, never prompts. */
 export function parseTranslateRequest(raw: unknown): TranslateRequest | null {
-  if (!raw || typeof raw !== 'object') return null
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const body = raw as Record<string, unknown>
+  if (Object.keys(body).some((key) => !TRANSLATE_FIELDS.has(key))) return null
   if (body.model !== undefined && !MODELS.includes(body.model as string)) return null
   if (!isKnownLanguage(body.target)) return null
   const title = body.title ?? ''
@@ -467,9 +487,12 @@ export function parseTranslateRequest(raw: unknown): TranslateRequest | null {
   return { model: (body.model as string | undefined) ?? null, target: body.target, title, kind, texts: texts as string[] }
 }
 
-/** Shared translation cache key: who asked does not matter, only what was translated and how. */
+/**
+ * Shared translation cache key: who asked does not matter, only what was translated and how
+ * (including the prompt version, so a prompt change is not hidden behind old translations).
+ */
 export async function cacheKey(model: string, target: string, kind: TranslateKind, text: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(`${model}|${target}|${kind}|${text}`))
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(`v${PROMPT_VERSION}|${model}|${target}|${kind}|${text}`))
   return CACHE_ORIGIN + [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
@@ -480,7 +503,7 @@ export type TranslateEvent =
   | { readonly error: { readonly code: ErrorCode; readonly message: string } }
 
 function messagesFor(req: TranslateRequest, texts: readonly string[]): ChatMessage[] {
-  const language = getLanguage(req.target).prompt
+  const language = getLanguage(req.target)
   return req.kind === 'page' ? buildBatchMessages(texts, language, req.title) : buildTextMessages(texts[0], language)
 }
 
@@ -516,15 +539,16 @@ async function handleTranslate(request: Request, env: Env, deps: Deps): Promise<
   const record = (errorCode: string) =>
     deps.metrics?.writeDataPoint({
       indexes: [model],
-      blobs: [model, stats.provider, errorCode, req.kind],
+      blobs: [model, stats.provider, errorCode, req.kind, plan],
       doubles: [chars, stats.firstContentAt ? stats.firstContentAt - started : 0, Date.now() - started, stats.cachedTokens, hits.length],
     })
 
-  // Quota covers only what goes to the model.
-  const counters = misses.length ? requestCounters(who, request, env) : []
+  // Quota covers only what goes to the model; unlimited plans skip it (the global count still sees them).
+  const isUnlimited = UNLIMITED_PLANS.has(plan)
+  const counters = misses.length && !isUnlimited ? requestCounters(who, request, env) : []
   let quotaError: { message: string; meta: unknown } | null = null
-  if (misses.length && isGloballyExhausted()) quotaError = { message: GLOBAL_EXHAUSTED_MESSAGE, meta: null }
-  else if (misses.length) {
+  if (counters.length && isGloballyExhausted()) quotaError = { message: GLOBAL_EXHAUSTED_MESSAGE, meta: null }
+  else if (counters.length) {
     const exhausted = await spend(deps, chars, counters)
     if (exhausted) quotaError = { message: 'Daily free quota used up', meta: quotaMeta(exhausted) }
   }

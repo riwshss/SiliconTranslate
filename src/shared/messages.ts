@@ -6,6 +6,7 @@ export const PORT_STREAM = 'silk:stream'
 
 export type ErrorCode =
   | 'quota'
+  | 'install-limit'
   | 'upgrade'
   | 'model-locked'
   | 'auth'

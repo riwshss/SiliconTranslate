@@ -18,6 +18,15 @@ describe('entitlement', () => {
     expect(sanitizeEntitlement(raw)).toEqual({ plan: 'pro', features: ['cloud-ai'], models: ['deepseek/deepseek-v4-flash', 'openai/gpt-6-sol'], quota })
   })
 
+  it('understands the developer plan: every model, no quota', () => {
+    expect(sanitizeEntitlement({ plan: 'dev', features: ['cloud-ai'], quota: null })).toEqual({
+      plan: 'dev',
+      features: ['cloud-ai'],
+      models: ['deepseek/deepseek-v4-flash', 'anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash'],
+      quota: null,
+    })
+  })
+
   it('gives an answer without a model list (older backend) the plan defaults', () => {
     expect(sanitizeEntitlement({ plan: 'beta', features: ['cloud-ai'] })?.models).toEqual(['deepseek/deepseek-v4-flash'])
     expect(sanitizeEntitlement({ plan: 'pro', features: ['cloud-ai'] })?.models).toHaveLength(4)

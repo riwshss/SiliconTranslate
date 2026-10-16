@@ -71,6 +71,14 @@ describe('streamTranslate against the Silk backend', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('does not retry when the network has used up its new installs for today', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 429, headers: { 'X-Silk-Error': 'install_limited' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const error = (await collect().catch((err: unknown) => err)) as ApiError
+    expect(error.code).toBe('install-limit')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('does not retry a refused install token', async () => {
     const fetchMock = vi.fn(async () => new Response('{"error":{"message":"bad token"}}', { status: 401, headers: { 'X-Silk-Error': 'unauthorized' } }))
     vi.stubGlobal('fetch', fetchMock)

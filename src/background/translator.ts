@@ -1,9 +1,10 @@
 import { ApiError, toApiError } from '../core/errors'
 import { LruCache } from '../core/lru'
 import { ConcurrencyPool } from '../core/pool'
+import { PROMPT_VERSION } from '../core/prompt'
 import { isSuspectTranslation } from '../core/reply'
 import { isLikelyInLanguage } from '../core/text-filter'
-import { getLanguage, type Language } from '../shared/languages'
+import { defaultTargetLang, getLanguage, type Language } from '../shared/languages'
 import type { ErrorCode } from '../shared/messages'
 import { MAX_CONCURRENCY, type Settings } from '../shared/settings'
 import { cloudApiConfig, usableModel } from './account'
@@ -36,9 +37,12 @@ async function chatConfig(settings: Settings): Promise<ApiConfig> {
   return cloudApiConfig(await usableModel(settings.model))
 }
 
-/** Keyed by the model actually called, which differs from the choice while it is locked. */
+/**
+ * Keyed by the model actually called (it differs from the choice while that is locked) and the
+ * prompt version, so translations made under an older prompt are not shown after an update.
+ */
 function cacheKey(model: string, targetLang: string, text: string): string {
-  return `${model}\u0001${targetLang}\u0001${text}`
+  return `${PROMPT_VERSION}\u0001${model}\u0001${targetLang}\u0001${text}`
 }
 
 /** Translates `group` (markup strings) and reports each finished item by its index in `group`. */
@@ -54,7 +58,7 @@ function groupTranslator(cfg: ApiConfig, targetLang: string, context: string): G
 }
 
 /** Errors a second attempt cannot fix. */
-const FINAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['quota', 'upgrade', 'model-locked', 'auth', 'bad-request', 'aborted', 'extension'])
+const FINAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['quota', 'install-limit', 'upgrade', 'model-locked', 'auth', 'bad-request', 'aborted', 'extension'])
 
 export interface BatchOutcome {
   readonly failed: number[]
@@ -149,7 +153,7 @@ export async function translateBatch(
 export function pickSelectionLanguage(settings: Settings, text: string): Language {
   const target = getLanguage(settings.targetLang)
   if (!isLikelyInLanguage(text, target.code)) return target
-  return getLanguage(target.code.startsWith('en') ? 'zh-CN' : 'en')
+  return getLanguage(target.code.startsWith('en') ? defaultTargetLang() : 'en')
 }
 
 export async function streamTextTranslation(

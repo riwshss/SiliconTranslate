@@ -63,10 +63,11 @@ const SILK_ERROR_HEADER = 'x-silk-error'
  * Backend errors that are a final answer. Its upstream_error (502) and server_error (500) also
  * carry the header but are transient, so they go through the normal 5xx retries.
  */
-const FINAL_SILK_ERRORS = new Set(['quota_exceeded', 'upgrade_required', 'model_locked', 'unauthorized', 'bad_request', 'gone'])
+const FINAL_SILK_ERRORS = new Set(['quota_exceeded', 'install_limited', 'upgrade_required', 'model_locked', 'unauthorized', 'bad_request', 'gone'])
 
 const SILK_ERROR_CODES: Readonly<Record<string, ErrorCode>> = {
   quota_exceeded: 'quota',
+  install_limited: 'install-limit',
   upgrade_required: 'upgrade',
   model_locked: 'model-locked',
   unauthorized: 'auth',
@@ -84,7 +85,7 @@ export function errorFromSilkCode(code: string, detail = ''): ApiError {
 async function errorFromResponse(res: Response): Promise<ApiError> {
   const silkError = res.headers.get(SILK_ERROR_HEADER)
   if (res.status === 402) return new ApiError('upgrade')
-  if (silkError === 'quota_exceeded' || silkError === 'upgrade_required' || silkError === 'model_locked') return errorFromSilkCode(silkError)
+  if (silkError === 'quota_exceeded' || silkError === 'install_limited' || silkError === 'upgrade_required' || silkError === 'model_locked') return errorFromSilkCode(silkError)
   const raw = await res.text().catch(() => '')
   let detail = raw.slice(0, 200)
   try {

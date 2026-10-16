@@ -1,10 +1,10 @@
 # 丝译 Silk Translate · Beta
 
 面向大众的 Chrome 网页翻译扩展（Manifest V3）。只使用 **Silk AI 云端翻译**：经 Silk 后端调用 [OpenRouter](https://openrouter.ai) 上的大模型，装好即用，无需 API Key。**测试版期间免费，每天 10 万字额度。**
-界面支持**简体中文与 English**（默认跟随浏览器语言，可在面板中切换）。
+界面支持**繁體中文（台湾用语）、简体中文与 English**（默认跟随浏览器语言，可在面板中切换）。产品定位和路线图见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 扩展：TypeScript + esbuild，无前端框架、无运行时依赖。后端：Cloudflare Worker（`server/`）。
 
-*English: a Chrome extension for in-place web page translation. It only uses the Silk AI cloud engine (no API key needed; free during the beta with 100,000 characters per day). During the beta it runs DeepSeek V4 Flash, the cheapest model; Claude Haiku 5.5, GPT-6 Sol and Gemini 3.8 Flash open after the beta. The interface is available in Simplified Chinese and English.*
+*English: a Chrome extension for in-place web page translation. It only uses the Silk AI cloud engine (no API key needed; free during the beta with 100,000 characters per day). During the beta it runs DeepSeek V4 Flash, the cheapest model; Claude Haiku 5.5, GPT-6 Sol and Gemini 3.8 Flash open after the beta. The interface is available in Traditional Chinese (Taiwan), Simplified Chinese and English.*
 
 ## 功能
 
@@ -28,8 +28,10 @@
 - **悬浮控制条**：页面右下角显示进度环，可切换模式、重试失败段落，空闲后自动收起。
 - **快捷键**：默认 `Alt+T`，循环切换 原文 → 默认模式 → 另一种模式；可在面板中重新录制。
 - **按网站记忆**：每个域名可设为「总是翻译」或「从不翻译」（同时禁用该站的划词翻译）。
-- **12 种目标语言**：简体中文、繁體中文、English、日本語、한국어、Français、Deutsch、Español、Русский、Português、Italiano、Tiếng Việt。
-- **中英文界面**：面板、悬浮控制条、划词卡片和错误提示都有中文与英文版本；「界面语言」可选「跟随浏览器」（中文浏览器显示中文，其余显示英文）、简体中文或 English。
+- **13 种目标语言**：简体中文、繁體中文（台灣用語）、繁體中文（香港書面語）、English、日本語、한국어、Français、Deutsch、Español、Русский、Português、Italiano、Tiếng Việt。
+- **繁中在地化**：繁體中文分台湾、香港两种目标语言。后端在提示词里附上当地用语指引（如台湾「影片、軟體、程式、資料、網路、品質」，香港「軟件、網絡、質素、的士」），不只是简体转字形；指引不计额度。新安装的默认目标语言取浏览器语言列表里第一个中文变体（zh-TW → 台湾，zh-HK / zh-MO → 香港，其他中文 → 简体），没有中文时为简体中文。
+- **三种界面语言**：面板、悬浮控制条、划词卡片和错误提示都有繁體中文（台湾用语，人工撰写而非转字形）、简体中文和英文版本；「界面语言」默认跟随浏览器（zh-TW / zh-HK / zh-MO / zh-Hant → 繁體，其他中文 → 简体，其余 → English）。
+- **按语言显示品牌名**：扩展名称和商店描述用 Chrome 的 `_locales`（`static/_locales/`）：繁中浏览器显示「絲譯」，简中显示「丝译」，其他语言显示「Silk Translate」。
 
 ## 安装
 
@@ -52,7 +54,7 @@ npm run build
 | 目标语言 | 整页翻译与划词翻译的目标语言 |
 | 默认模式 | 点「翻译此页」或按快捷键时首先使用的模式 |
 | 双语样式 | 虚线下划线 / 高亮 |
-| 界面语言 | 跟随浏览器 / 简体中文 / English |
+| 界面语言 | 跟随浏览器 / 繁體中文 / 简体中文 / English |
 | 并发数 | 固定为 8，不能修改（所有标签页共用）。遇到 429 限流时并发自动减半、按 `Retry-After` 退避重试，之后逐步恢复；「今日额度用完」不会重试 |
 
 从旧版本（带自定义 AI 接口、Google 翻译、Chrome 本地模型）升级时，扩展会在更新后自动删除本机保存的旧 API Key 和引擎设置。
@@ -61,7 +63,7 @@ npm run build
 
 Cloudflare Worker，作用是**把 OpenRouter 的 Key 留在服务器上**（写进扩展的 Key 一定会被人拆出来盗用），并给每个安装按日限额。
 
-- **安装令牌由服务器签发：** 扩展第一次需要时调用 `POST /v1/install`，后端生成安装 ID，返回 `token = id + "." + base64url(HMAC-SHA256(INSTALL_SECRET, id))`，扩展保存在本机，之后每个请求放在 `X-Silk-Install` 头里。后端每次用 `crypto.subtle` 验签（纯计算，不访问存储），伪造或篡改的令牌一律 `401`。每个 IP 每天最多签发 `INSTALLS_PER_IP_DAILY`（默认 3）个令牌，防止换 ID 刷额度。令牌不含任何个人信息；后端返回 `401` 时扩展丢掉旧令牌，下次请求自动申请新的。
+- **安装令牌由服务器签发：** 扩展第一次需要时调用 `POST /v1/install`，后端生成安装 ID，返回 `token = id + "." + base64url(HMAC-SHA256(INSTALL_SECRET, id))`，扩展保存在本机，之后每个请求放在 `X-Silk-Install` 头里。后端每次用 `crypto.subtle` 验签（纯计算，不访问存储），伪造或篡改的令牌一律 `401`。每个 IP 每天最多签发 `INSTALLS_PER_IP_DAILY`（默认 3）个令牌，防止换 ID 刷额度；超出时返回 `429 install_limited`，扩展提示「所在网络今天新安装次数已达上限」。令牌不含任何个人信息；后端返回 `401` 时扩展丢掉旧令牌，下次请求自动申请新的。
 - **客户端只发数据，提示词由后端拼：** `POST /v1/translate` 的请求体是 `{ model?, target, title?, kind: "page" | "selection", texts }`。`target` 必须是 12 个语言代码之一，`title` ≤ 200 字；`page` 每次 1–12 段、每段 ≤ 6000 字（与扩展 `MAX_MARKUP_CHARS` 一致），`selection` 恰好 1 段、≤ 5000 字。提示词用的是扩展同一份 `src/core/prompt.ts`（wrangler 会一起打包），所以这个接口不能被当成通用的大模型 API 用。
 - **只按原文字数扣额度**，没有最低收费；输出上限仍按 `原文字数 × 2 + 256` token 封顶。UTC 0 点重置。限额都在 `server/wrangler.toml` 里调：
   - 每个安装：`INSTALL_DAILY_CHARS`（默认 10 万字，与正式版免费档准备给的水平一致）
@@ -70,6 +72,8 @@ Cloudflare Worker，作用是**把 OpenRouter 的 Key 留在服务器上**（写
 - **共享翻译缓存：** 每一段的译文按 `sha256(模型|目标语言|kind|原文)` 存进 Cloudflare 缓存（`caches.default`，7 天）。请求进来先逐段查缓存，命中的段落立刻流式返回、不扣额度，只把没命中的发给 OpenRouter。看起来被截断或丢了格式标记的译文不进缓存。⚠️ `caches.default` 只在挂了自定义域名的 Worker 上可靠生效，`*.workers.dev` 上可能是空操作，上线后请用指标里的 `cacheHits` 确认。
 - **响应格式：** `text/event-stream`，每行一个事件：`{"index":0,"text":"…"}`（整页，一段译完一行）、`{"delta":"…"}`（划词，流式片段）、`{"error":{"code","message"}}`，最后是 `[DONE]`。没有缓存命中时，上游失败直接返回 HTTP 错误（`502 upstream_error`，扩展会自动重试）；已经先发了缓存段落时，上游失败以 `error` 事件结束，只退还没送达段落的额度。
 - 模型由客户端在请求的 `model` 字段中指定。`server/src/app.ts` 的 `MODELS` 是全部已知模型（与扩展的 `CLOUD_MODELS` 一致），未知模型返回 `400`；`PLAN_MODELS` 决定每个套餐能用哪些：测试版只有 `deepseek/deepseek-v4-flash`，`pro` 全部可用。请求套餐外的模型返回 `403` 并带 `X-Silk-Error: model_locked`，不扣额度；不传模型时用套餐的第一个。
+- **请求体只能有这五个字段**，带 `messages`、`system` 等任何其他字段一律 `400`。
+- **共享缓存和扩展缓存的键都包含 `PROMPT_VERSION`**（`src/core/prompt.ts`）：改了会影响译文的提示词（比如用语指引）时把它加 1，否则 7 天内仍会拿到旧译文。
 - `GET /v1/entitlement` 会返回套餐可用的 `models`，扩展据此锁定面板里的其他模型；用户之前选了锁定的模型时，自动改用套餐默认模型。
 - 同一个模型在 OpenRouter 上由多家服务商提供，速度差很多（DeepSeek V4 Flash 约 5–80 token/秒）。后端请求时带上 `provider.preferred_min_throughput`（`MIN_PROVIDER_THROUGHPUT`，默认 50）：达不到这个速度的服务商排到后面，只在其他都不可用时才用，所以总是先用「够快的里面最便宜的」。
 - DeepSeek V4 Flash 支持推理模式，后端请求时带 `reasoning: { effort: "none" }` 关闭思考，避免多花输出 token（`MODEL_OPTIONS`）。
@@ -107,6 +111,24 @@ npx wrangler deploy                         # 输出 https://silk-translate-api.
 | `SILK_CHANNEL` | `beta`（默认：名称带 Beta，云端 AI 默认可用）或 `stable` |
 | `SILK_OUTDIR` | 输出目录，默认 `dist` |
 
+### 开发者账号
+
+给自己用的安装可以设成 `dev` 套餐：**四个模型都能选，没有每日额度，也不受全站熔断限制**（用量仍计入全站统计，指标里 `plan = dev`，方便和真实用户分开看）。
+
+1. 在自己的浏览器里装好扩展，打开面板点一次「查看额度」（会自动申请安装令牌）。
+2. 打开 `chrome://extensions` → 丝译 →「Service Worker」→ 控制台，执行：
+   ```js
+   (await chrome.storage.local.get('installToken')).installToken.split('.')[0]
+   ```
+   输出的 UUID 就是你的安装 ID。
+3. 把它写进后端 secret（多个设备用逗号分隔），不需要重新部署代码：
+   ```bash
+   cd server && npx wrangler secret put DEV_INSTALL_IDS
+   ```
+4. 回到面板点「查看额度」：显示「开发者 · 无限制」，所有模型解锁。
+
+安装 ID 跟着扩展的本地存储走：卸载重装、换浏览器配置文件都会得到新的 ID，需要重新加进去。本地调试时写进 `server/.dev.vars` 的 `DEV_INSTALL_IDS=…`。
+
 ### 以后接入内购
 
 付费逻辑只需改后端，扩展基本不用动：
@@ -136,8 +158,18 @@ npm run e2e         # Playwright 真浏览器端到端测试（自动构建一�
 npm run icons       # 重新生成 static/icons 下的 PNG 图标
 ```
 
-E2E 使用本地 mock 服务器模拟 Silk 后端：签发安装令牌、`/v1/translate` 事件流、429 限流、并发统计、额度查询、按套餐锁定模型（测试版 / 正式版）、额度用完，以及中英文界面切换；不消耗真实 API 额度，截图输出到 `e2e/output/`。
+E2E 使用本地 mock 服务器模拟 Silk 后端：签发安装令牌、`/v1/translate` 事件流、429 限流、并发统计、额度查询、按套餐锁定模型（测试版 / 正式版 / 开发者）、额度用完，以及繁中、简中、英文界面切换；不消耗真实 API 额度，截图输出到 `e2e/output/`。
 后端的单元测试在 `tests/server.test.ts`，和扩展一起由 `npm test` 运行。
+
+**译文质量回归集**（不在 CI 里跑，会消耗真实额度）：`tests/fixtures/regression/paragraphs.json` 有 65 段，覆盖台湾 / 香港用语陷阱、行内标记、技术术语、长句和界面短句，每段可以标注必须出现、不能出现、必须原样保留的文字。
+
+```bash
+npm run regression -- --target zh-TW                          # 调用正式后端，结果写到 regression-output/
+npm run regression -- --target zh-HK --model openai/gpt-6-sol  # 指定模型（需要开发者账号或对应套餐）
+npm run regression -- --target zh-TW --baseline regression-output/<上一次>.json   # 和上一次逐段对比
+```
+
+报告（`.md`）列出没通过检查的段落、和基线相比有变化的段落（前后对照，供人工判断），以及首段耗时。改提示词前后各跑一次再对比；别忘了先把 `PROMPT_VERSION` 加 1，否则后端共享缓存会直接返回旧译文。安装令牌优先读 `SILK_TOKEN`，其次是 `regression-output/token.txt`，都没有时申请一个并保存。用开发者账号的令牌跑就不受每日额度限制。
 如 Playwright 浏览器装在非默认位置，请设置 `PLAYWRIGHT_BROWSERS_PATH`；要用一个现成的 Chromium（版本和 Playwright 期望的不同也行），设置 `SILK_E2E_CHROMIUM=<chrome 可执行文件路径>`。
 每次 push 和 PR 都会在 GitHub Actions（`.github/workflows/ci.yml`）里跑 `npm ci`、两边的类型检查和 `npm test`。
 

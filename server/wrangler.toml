@@ -31,6 +31,8 @@ APP_TITLE = "Silk Translate"
 # Secrets, never committed:
 #   npx wrangler secret put OPENROUTER_API_KEY
 #   npx wrangler secret put INSTALL_SECRET      (e.g. `openssl rand -base64 32`; rotating it signs everyone out)
+#   npx wrangler secret put DEV_INSTALL_IDS     (optional: your own install ids, comma separated → developer plan,
+#                                                every model and no quota; see README "开发者账号")
 
 [[durable_objects.bindings]]
 name = "QUOTA"
@@ -40,7 +42,7 @@ class_name = "QuotaCounter"
 tag = "v1"
 new_sqlite_classes = ["QuotaCounter"]
 
-# One data point per /v1/translate request: blobs [model, provider, errorCode, kind],
+# One data point per /v1/translate request: blobs [model, provider, errorCode, kind, plan],
 # doubles [chars, ttftMs, totalMs, cachedTokens, cacheHits].
 [[analytics_engine_datasets]]
 binding = "METRICS"

@@ -35,7 +35,7 @@ export function hasLocalTranslator(): boolean {
 /** Our language codes (src/shared/languages.ts) as BCP 47 tags the Translator API knows. */
 export function toTranslatorLanguage(code: string): string {
   if (code === 'zh-CN') return 'zh'
-  if (code === 'zh-TW') return 'zh-Hant'
+  if (code === 'zh-TW' || code === 'zh-HK') return 'zh-Hant'
   return code
 }
 

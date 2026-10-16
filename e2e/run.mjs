@@ -262,6 +262,13 @@ try {
       return root.querySelector('.seg button[data-mode="original"]').textContent === 'Original'
     })
   })
+  await check('界面语言切到繁體中文：台湾用语与「10萬」额度', async () => {
+    await popup.selectOption('#ui-lang', 'zh-TW')
+    await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('今天已用'))
+    assert((await popup.$eval('#translate-btn', (el) => el.textContent.trim())) === '翻譯這個網頁', 'translate button')
+    assert((await popup.$eval('#test-result', (el) => el.textContent)).includes('10萬'), 'quota in Traditional Chinese')
+    assert((await popup.title()) === '絲譯 Silk Translate', await popup.title())
+  })
   await popup.selectOption('#ui-lang', 'zh-CN')
   await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('今日已用'))
 
@@ -299,6 +306,21 @@ try {
         timeout: 10000,
       })
       assert(cloud.models.slice(before).every((m) => m === 'openai/gpt-6-sol') && cloud.models.length > before, cloud.models.slice(before).join(','))
+      cloud.plan = 'beta'
+      cloud.planModels = ALL_MODELS.slice(0, 1)
+      await popup.click('#test-btn')
+      await popup.waitForFunction(() => document.querySelectorAll('.model[aria-disabled="true"]').length === 3)
+    })
+    await check('开发者账号：显示「开发者 · 无限制」、不显示额度、四个模型都可选', async () => {
+      cloud.plan = 'dev'
+      cloud.planModels = ALL_MODELS
+      await popup.bringToFront()
+      await popup.click('#test-btn')
+      await popup.waitForFunction(() => document.getElementById('test-result').textContent.includes('开发者'))
+      const result = await popup.$eval('#test-result', (el) => el.textContent)
+      assert(result === '开发者 · 无限制', result)
+      assert((await popup.$$('.model[aria-disabled="true"]')).length === 0, 'locked models on the developer plan')
+      assert(await popup.$eval('#models-hint', (el) => el.hidden), 'beta hint shown on the developer plan')
       cloud.plan = 'beta'
       cloud.planModels = ALL_MODELS.slice(0, 1)
       await popup.click('#test-btn')

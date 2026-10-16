@@ -93,7 +93,8 @@ function acceptCloud(req, res) {
 
 function handleEntitlement(req, res) {
   if (!acceptCloud(req, res)) return
-  const quota = { used: cloud.isQuotaExhausted ? 100000 : 1234, limit: 100000, resetAt: '2026-10-18T00:00:00.000Z' }
+  // The developer plan has no quota.
+  const quota = cloud.plan === 'dev' ? null : { used: cloud.isQuotaExhausted ? 100000 : 1234, limit: 100000, resetAt: '2026-10-18T00:00:00.000Z' }
   res.writeHead(200, JSON_CORS)
   res.end(JSON.stringify({ success: true, data: { plan: cloud.plan, features: ['cloud-ai'], models: cloud.planModels, quota }, error: null, meta: null }))
 }
