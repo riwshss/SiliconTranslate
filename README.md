@@ -116,6 +116,16 @@ npx wrangler deploy                         # 输出 https://silk-translate-api.
 
 给自己用的安装可以设成 `dev` 套餐：**四个模型都能选，没有每日额度，也不受全站熔断限制**（用量仍计入全站统计，指标里 `plan = dev`，方便和真实用户分开看）。
 
+**最简单：开发者密钥。** 后端设一次 secret `DEV_KEY`（至少 32 个字符，例如 `openssl rand -base64 32`）：
+
+```bash
+cd server && npx wrangler secret put DEV_KEY
+```
+
+之后在任意浏览器里：打开面板，**连点左上角的图标 5 次**，出现「开发者模式」卡片，贴上密钥点「启用」，显示「已启用开发者模式」即可。密钥存在这个浏览器的扩展本地存储里，随每个请求以 `X-Silk-Dev-Key` 发给后端；同一个密钥可以在多台电脑上用，卡片里可随时「退出开发者模式」。拿到密钥的人都能无限制花你的 OpenRouter 余额，泄露了就重新 `wrangler secret put DEV_KEY` 换一个（旧密钥立即失效）。
+
+**或者按安装 ID 指定**（不用在浏览器里存密钥）：
+
 1. 在自己的浏览器里装好扩展，打开面板点一次「查看额度」（会自动申请安装令牌）。
 2. 打开 `chrome://extensions` → 丝译 →「Service Worker」→ 控制台，执行：
    ```js

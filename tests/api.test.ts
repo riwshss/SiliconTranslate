@@ -132,4 +132,13 @@ describe('install token', () => {
     const { getInstallToken } = await import('../src/background/account')
     await expect(getInstallToken()).rejects.toMatchObject({ code: 'bad-response' })
   })
+
+  it('sends the stored developer key with every Silk request, and nothing when it is malformed', async () => {
+    const { cloudApiConfig } = await import('../src/background/account')
+    store.installToken = TOKEN
+    store.devKey = 'd'.repeat(43)
+    expect((await cloudApiConfig('m')).headers).toEqual({ 'X-Silk-Install': TOKEN, 'X-Silk-Dev-Key': 'd'.repeat(43) })
+    store.devKey = 'bad key\r\nX-Evil: 1'
+    expect((await cloudApiConfig('m')).headers).toEqual({ 'X-Silk-Install': TOKEN })
+  })
 })

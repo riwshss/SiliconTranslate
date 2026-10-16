@@ -1,3 +1,4 @@
+import { DEV_KEY_STORAGE_KEY, sanitizeDevKey } from '../shared/dev-key'
 import { canUseCloudAi, defaultEntitlement, describeQuota, effectiveModel, PLAN_LABELS, sanitizeEntitlement, type Entitlement } from '../shared/entitlement'
 import { resolveUiLang, translator, UI_LANG_SETTINGS, type MessageKey, type Translate, type UiLangSetting } from '../shared/i18n'
 import { LANGUAGES } from '../shared/languages'
@@ -285,8 +286,8 @@ function initModelPicker(): void {
   renderModels()
 }
 
-/** Plan and today's quota, straight from the backend. */
-async function checkAccount(): Promise<void> {
+/** Plan and today's quota, straight from the backend; false when the backend could not be asked. */
+async function checkAccount(): Promise<boolean> {
   setConn('idle', 'connChecking')
   const result = (await chrome.runtime.sendMessage({ type: 'silk:account' } satisfies AccountRequest).catch((err: unknown) => {
     console.error('[silk] account check failed', err)
@@ -295,7 +296,7 @@ async function checkAccount(): Promise<void> {
   if (!result.ok) {
     setTestResult(result.message, 'error')
     setConn('error', 'connFailed')
-    return
+    return false
   }
   entitlement = result.entitlement
   renderModels()
@@ -307,6 +308,7 @@ async function checkAccount(): Promise<void> {
   if (!isEnabled) setConn('warn', 'connUpgrade')
   else if (isExhausted) setConn('warn', 'connQuota')
   else setConn('ok', 'connReady')
+  return true
 }
 
 /** Thin usage bar: indigo below 80 %, warning colour from 80 %, danger when used up (the text says the same). */
@@ -330,6 +332,62 @@ async function runAccountCheck(): Promise<void> {
   } finally {
     button.classList.remove('is-loading')
   }
+}
+
+// ───────────── developer mode ─────────────
+
+/** Clicks on the logo that reveal the developer card (it stays visible while a key is stored). */
+const DEV_UNLOCK_CLICKS = 5
+
+function setDevStatus(key: MessageKey | null, kind: 'ok' | 'error' | '' = ''): void {
+  const status = $('dev-status')
+  status.textContent = key ? t(key) : ''
+  status.className = `small ${kind}`
+}
+
+async function storedDevKey(): Promise<string | null> {
+  return sanitizeDevKey((await chrome.storage.local.get(DEV_KEY_STORAGE_KEY))[DEV_KEY_STORAGE_KEY])
+}
+
+/** Stores the key, then keeps it only if the backend answers with the developer plan. */
+async function saveDevKey(raw: string): Promise<void> {
+  const key = sanitizeDevKey(raw)
+  if (!key) return setDevStatus('devKeyInvalid', 'error')
+  await chrome.storage.local.set({ [DEV_KEY_STORAGE_KEY]: key })
+  if (!(await checkAccount())) return setDevStatus('devKeyUnverified', 'error')
+  if (entitlement.plan !== 'dev') {
+    await chrome.storage.local.remove(DEV_KEY_STORAGE_KEY)
+    void checkAccount()
+    return setDevStatus('devKeyInvalid', 'error')
+  }
+  $<HTMLInputElement>('dev-key').value = ''
+  $('dev-remove').hidden = false
+  setDevStatus('devKeyActive', 'ok')
+}
+
+async function removeDevKey(): Promise<void> {
+  await chrome.storage.local.remove(DEV_KEY_STORAGE_KEY)
+  $('dev-remove').hidden = true
+  setDevStatus(null)
+  await checkAccount()
+}
+
+async function initDevMode(): Promise<void> {
+  const isActive = !!(await storedDevKey())
+  $('dev-card').hidden = !isActive
+  $('dev-remove').hidden = !isActive
+  if (isActive) setDevStatus('devKeyActive', 'ok')
+  let clicks = 0
+  document.querySelector('.logo')?.addEventListener('click', () => {
+    if (++clicks < DEV_UNLOCK_CLICKS) return
+    $('dev-card').hidden = false
+    $('dev-key').focus()
+  })
+  $('dev-save').addEventListener('click', () => void saveDevKey($<HTMLInputElement>('dev-key').value))
+  $('dev-key').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') void saveDevKey($<HTMLInputElement>('dev-key').value)
+  })
+  $('dev-remove').addEventListener('click', () => void removeDevKey())
 }
 
 // ───────────── interface language ─────────────
@@ -388,6 +446,7 @@ async function init(): Promise<void> {
   renderShortcut(settings.shortcut)
   initShortcutRecorder()
   $('test-btn').addEventListener('click', () => void runAccountCheck())
+  await initDevMode()
   void runAccountCheck()
   await initPage()
 }

@@ -251,6 +251,22 @@ kbd {
 #test-result.ok { color: var(--ok); }
 #test-result.error { color: var(--danger); }
 
+.dev-key {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-silk), box-shadow var(--dur-fast) var(--ease-silk);
+}
+.dev-key:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#dev-status { flex: 1; }
+#dev-status.ok { color: var(--ok); }
+#dev-status.error { color: var(--danger); }
+
 footer { display: flex; justify-content: space-between; align-items: center; padding: 0 4px; font-size: 12px; line-height: 16px; }
 footer a { color: var(--accent); text-decoration: none; font-weight: 550; }
 footer a:hover { text-decoration: underline; }

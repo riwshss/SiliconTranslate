@@ -58,6 +58,19 @@
         <div id="quota-meter" class="meter" hidden><i></i></div>
       </section>
 
+      <section class="card" id="dev-card" hidden>
+        <h2 data-i18n="devTitle"></h2>
+        <p class="hint" data-i18n="devHint"></p>
+        <div class="row">
+          <input id="dev-key" class="dev-key" type="password" autocomplete="off" spellcheck="false" data-i18n-aria="devKeyLabel" />
+          <button id="dev-save" class="secondary" type="button" data-i18n="devKeySave"></button>
+        </div>
+        <div class="row">
+          <span id="dev-status" class="small" aria-live="polite"></span>
+          <button id="dev-remove" class="secondary" type="button" data-i18n="devKeyRemove" hidden></button>
+        </div>
+      </section>
+
       <section class="card">
         <h2 data-i18n="prefsTitle"></h2>
         <label class="field">

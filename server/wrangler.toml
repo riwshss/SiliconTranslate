@@ -33,6 +33,8 @@ APP_TITLE = "Silk Translate"
 #   npx wrangler secret put INSTALL_SECRET      (e.g. `openssl rand -base64 32`; rotating it signs everyone out)
 #   npx wrangler secret put DEV_INSTALL_IDS     (optional: your own install ids, comma separated → developer plan,
 #                                                every model and no quota; see README "开发者账号")
+#   npx wrangler secret put DEV_KEY             (optional, at least 32 characters: pasted in the popup after five
+#                                                clicks on the logo → developer plan in that browser)
 
 [[durable_objects.bindings]]
 name = "QUOTA"
