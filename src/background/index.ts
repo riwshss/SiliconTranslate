@@ -14,6 +14,7 @@ import {
 import { CLOUD_API_URL } from '../shared/service'
 import { dropLegacySettings, loadSettings } from '../shared/settings'
 import { contentScriptMatches } from '../shared/site-access'
+import { handleCommand } from '../shared/tab-messaging'
 import { forgetInstallToken, refreshEntitlement } from './account'
 import { pickSelectionLanguage, streamTextTranslation, translateBatch } from './translator'
 
@@ -49,6 +50,10 @@ chrome.runtime.onInstalled.addListener(() => {
 })
 chrome.permissions.onAdded.addListener(syncContentScript)
 chrome.permissions.onRemoved.addListener(syncContentScript)
+
+// The shortcut works on any tab, granted or not: the command itself grants activeTab, so the
+// content script can be injected on the spot. Pages no extension may touch just ignore it.
+chrome.commands.onCommand.addListener((command, tab) => void handleCommand(command, tab).catch(() => undefined))
 
 async function uiLang(): Promise<UiLang> {
   const settings = await loadSettings().catch(() => null)

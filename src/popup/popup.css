@@ -235,8 +235,6 @@ select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-s
   cursor: pointer;
 }
 .kbd-btn:hover { border-color: var(--line); background: var(--hover); }
-.kbd-btn.is-recording { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-size: 12px; padding: 4px 12px; }
-.kbd-btn.is-invalid { animation: shake 0.3s; border-color: var(--danger); }
 kbd {
   min-width: 24px;
   padding: 0 6px;
@@ -273,7 +271,6 @@ footer a:hover { text-decoration: underline; }
 .saved { color: var(--muted); opacity: 0; transition: opacity var(--dur) var(--ease-out); }
 .saved.is-visible { opacity: 1; }
 
-@keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 /* Reduced motion: no movement or scaling; the loading thread stands still. */
 @media (prefers-reduced-motion: reduce) {

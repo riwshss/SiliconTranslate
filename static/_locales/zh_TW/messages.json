@@ -14,5 +14,9 @@
   "appDescription": {
     "message": "無痕網頁翻譯 · Silk AI 雲端翻譯 · 雙語對照 · 選取文字翻譯，譯文用詞道地。",
     "description": "Store and extensions-page description. Do not name models that are not available yet."
+  },
+  "commandToggle": {
+    "message": "翻譯此頁 / 切換模式（原文 → 預設模式 → 另一種模式）",
+    "description": "The keyboard shortcut's name at chrome://extensions/shortcuts."
   }
 }

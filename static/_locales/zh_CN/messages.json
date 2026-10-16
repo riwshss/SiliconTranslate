@@ -14,5 +14,9 @@
   "appDescription": {
     "message": "无痕网页翻译 · Silk AI 云端翻译 · 双语对照 · 划词翻译。",
     "description": "Store and extensions-page description. Do not name models that are not available yet."
+  },
+  "commandToggle": {
+    "message": "翻译此页 / 切换模式（原文 → 默认模式 → 另一种模式）",
+    "description": "The keyboard shortcut's name at chrome://extensions/shortcuts."
   }
 }

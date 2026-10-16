@@ -75,9 +75,16 @@ try {
     return document.body.innerHTML
   })
   const text = (sel) => page.$eval(sel, (el) => el.textContent)
+  // Alt+T is a browser command, and headless Chromium does not route synthetic key presses to
+  // commands: send what the command handler sends to the tab.
+  const pressShortcut = () =>
+    worker.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url })
+      await chrome.tabs.sendMessage(tab.id, { type: 'silk:toggle' })
+    }, `${origin}/page`)
 
   console.log('\n覆盖模式 (Alt+T)')
-  await page.keyboard.press('Alt+T')
+  await pressShortcut()
   await check('首屏段落被翻译（429 后自动重试成功）', async () => {
     await page.waitForFunction(() => document.getElementById('p1').textContent.includes('译·'), null, { timeout: 15000 })
     assert(stats.rateLimited === 1, `rateLimited=${stats.rateLimited}`)
@@ -161,7 +168,7 @@ try {
     assert(html === initialHtml, 'DOM differs from the original')
   })
   await check('切换期间零新增 API 请求', async () => {
-    await page.keyboard.press('Alt+T')
+    await pressShortcut()
     await page.waitForFunction(() => document.getElementById('p1').textContent.includes('译·'))
     assert(stats.batchRequests === requestsBeforeSwitch, `${stats.batchRequests} vs ${requestsBeforeSwitch}`)
   })

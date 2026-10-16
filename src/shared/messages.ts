@@ -55,10 +55,12 @@ export type AccountResult =
   | { readonly ok: true; readonly latencyMs: number; readonly entitlement: Entitlement }
   | { readonly ok: false; readonly message: string }
 
-/** popup → content via tabs.sendMessage */
+/** popup / background (keyboard shortcut) → content via tabs.sendMessage */
 export type TabMessage =
   | { readonly type: 'silk:get-state' }
   | { readonly type: 'silk:set-mode'; readonly mode: DisplayMode }
+  /** The keyboard shortcut: original → default mode → the other mode → original. */
+  | { readonly type: 'silk:toggle' }
 
 export interface PageState {
   readonly mode: DisplayMode

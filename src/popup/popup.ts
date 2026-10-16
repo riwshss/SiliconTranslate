@@ -15,8 +15,8 @@ import {
   type Settings,
   type TranslateMode,
 } from '../shared/settings'
-import { eventToShortcut, isValidShortcut } from '../shared/shortcut'
 import { ALL_SITES, hasAllSites, sitePattern } from '../shared/site-access'
+import { sendToTab, SHORTCUTS_PAGE, TOGGLE_COMMAND } from '../shared/tab-messaging'
 import { segmented } from './segmented'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -52,15 +52,9 @@ async function persist(patch: Partial<Settings>): Promise<void> {
 
 // ───────────── page (active tab) ─────────────
 
-async function sendToTab(message: TabMessage): Promise<PageState> {
-  if (tabId === null) throw new Error('no tab')
-  try {
-    return (await chrome.tabs.sendMessage(tabId, message)) as PageState
-  } catch {
-    // Tab was open before install/update: inject the content script once (activeTab grant).
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] })
-    return (await chrome.tabs.sendMessage(tabId, message)) as PageState
-  }
+function sendToActiveTab(message: TabMessage): Promise<PageState> {
+  if (tabId === null) return Promise.reject(new Error('no tab'))
+  return sendToTab(tabId, message)
 }
 
 const modeSeg = segmented($('mode-seg'), (value) => void setPageMode(value as DisplayMode))
@@ -97,7 +91,7 @@ function disablePage(note: MessageKey): void {
 
 async function setPageMode(mode: DisplayMode): Promise<void> {
   try {
-    renderPageState(await sendToTab({ type: 'silk:set-mode', mode }))
+    renderPageState(await sendToActiveTab({ type: 'silk:set-mode', mode }))
   } catch {
     disablePage('pageCannotRun')
   }
@@ -119,8 +113,8 @@ async function initPage(): Promise<void> {
   $('host').textContent = host
   ruleSeg.setValue(settings.domainRules[host] ?? '')
   try {
-    renderPageState(await sendToTab({ type: 'silk:get-state' }))
-    pollTimer = setInterval(async () => renderPageState(await sendToTab({ type: 'silk:get-state' }).catch(() => null)), 700)
+    renderPageState(await sendToActiveTab({ type: 'silk:get-state' }))
+    pollTimer = setInterval(async () => renderPageState(await sendToActiveTab({ type: 'silk:get-state' }).catch(() => null)), 700)
   } catch {
     renderPageState(null)
   }
@@ -143,9 +137,15 @@ $('translate-btn').addEventListener('click', () => void setPageMode(settings.def
 const defaultModeSeg = segmented($('default-mode'), (value) => void persist({ defaultMode: value as TranslateMode }))
 const styleSeg = segmented($('style-seg'), (value) => void persist({ bilingualStyle: value as BilingualStyle }))
 
-function renderShortcut(shortcut: string): void {
+/** Shows the shortcut Chrome has bound to the toggle command (empty when the user removed it). */
+async function renderShortcut(): Promise<void> {
+  const commands = await chrome.commands.getAll()
+  const shortcut = commands.find((c) => c.name === TOGGLE_COMMAND)?.shortcut ?? ''
   const button = $('shortcut')
-  button.classList.remove('is-recording')
+  if (!shortcut) {
+    button.textContent = t('shortcutNone')
+    return
+  }
   button.replaceChildren(
     ...shortcut.split('+').map((part) => {
       const kbd = document.createElement('kbd')
@@ -155,35 +155,10 @@ function renderShortcut(shortcut: string): void {
   )
 }
 
-function initShortcutRecorder(): void {
-  const button = $('shortcut')
-  let isRecording = false
-  const stop = () => {
-    isRecording = false
-    renderShortcut(settings.shortcut)
-  }
-  button.addEventListener('click', () => {
-    isRecording = true
-    button.classList.add('is-recording')
-    button.textContent = t('shortcutRecording')
-  })
-  button.addEventListener('blur', () => isRecording && stop())
-  button.addEventListener('keydown', (e) => {
-    if (!isRecording) return
-    e.preventDefault()
-    if (e.key === 'Escape') return stop()
-    const shortcut = eventToShortcut(e)
-    if (!shortcut) return
-    if (!isValidShortcut(shortcut)) {
-      button.classList.remove('is-invalid')
-      void button.offsetWidth
-      button.classList.add('is-invalid')
-      button.textContent = t('shortcutInvalid')
-      return
-    }
-    button.classList.remove('is-invalid')
-    void persist({ shortcut }).then(stop)
-  })
+/** Chrome owns the binding: the button opens its shortcut page (extension pages may open chrome:// URLs). */
+function initShortcut(): void {
+  $('shortcut').addEventListener('click', () => void chrome.tabs.create({ url: SHORTCUTS_PAGE }))
+  void renderShortcut()
 }
 
 /**
@@ -440,11 +415,10 @@ async function init(): Promise<void> {
   $('ui-lang').addEventListener('change', async (e) => {
     await persist({ uiLang: (e.target as HTMLSelectElement).value as UiLangSetting })
     applyLanguage()
-    renderShortcut(settings.shortcut)
+    void renderShortcut()
     void runAccountCheck()
   })
-  renderShortcut(settings.shortcut)
-  initShortcutRecorder()
+  initShortcut()
   $('test-btn').addEventListener('click', () => void runAccountCheck())
   await initDevMode()
   void runAccountCheck()
