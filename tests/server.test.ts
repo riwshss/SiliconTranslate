@@ -78,6 +78,8 @@ describe('parseChatRequest', () => {
     expect(MODELS).toEqual(['deepseek/deepseek-v4-flash', 'anthropic/claude-haiku-5.5', 'openai/gpt-6-sol', 'google/gemini-3.8-flash'])
     expect(PLAN_MODELS.beta).toEqual(['deepseek/deepseek-v4-flash'])
     expect(parseChatRequest({ messages }, 512)?.model).toBeNull()
+    // Extension v2.0 always sent "silk-cloud": it keeps working on the plan default.
+    expect(parseChatRequest({ model: 'silk-cloud', messages }, 512)?.model).toBeNull()
     expect(parseChatRequest({ model: 'openai/gpt-6-astra', messages }, 512)).toBeNull()
     expect(parseChatRequest({ model: 42, messages }, 512)).toBeNull()
   })

@@ -43,6 +43,9 @@ export const MODELS: readonly string[] = ['deepseek/deepseek-v4-flash', 'anthrop
  */
 export const PLAN_MODELS: Record<Plan, readonly string[]> = { beta: ['deepseek/deepseek-v4-flash'], free: [], pro: MODELS }
 
+/** Model name extension v2.0 sent before models were selectable; it means "the plan default". */
+const LEGACY_MODEL = 'silk-cloud'
+
 /** Extra OpenRouter fields per model. DeepSeek V4 can reason, which translation never needs. */
 const MODEL_OPTIONS: Readonly<Record<string, Record<string, unknown>>> = {
   'deepseek/deepseek-v4-flash': { reasoning: { effort: 'none' } },
@@ -112,11 +115,12 @@ export function parseChatRequest(raw: unknown, maxOutputTokens: number): ChatReq
     (m) => !!m && typeof m === 'object' && ROLES.has((m as { role: unknown }).role as string) && typeof (m as { content: unknown }).content === 'string',
   )
   if (!isValid) return null
-  if (body.model !== undefined && !MODELS.includes(body.model as string)) return null
+  const model = body.model === LEGACY_MODEL ? undefined : body.model
+  if (model !== undefined && !MODELS.includes(model as string)) return null
   const temperature = Number(body.temperature)
   const maxTokens = Number(body.max_tokens)
   return {
-    model: (body.model as string | undefined) ?? null,
+    model: (model as string | undefined) ?? null,
     messages: messages.map((m) => ({ role: m.role as string, content: m.content as string })),
     stream: body.stream === true,
     temperature: Number.isFinite(temperature) ? Math.min(Math.max(temperature, 0), 1) : 0.2,
