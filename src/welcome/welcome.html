@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>丝译 Silk Translate</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="welcome.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <img class="logo" src="icons/logo-56.png" alt="" width="56" height="56" />
+        <h1 data-i18n="welcomeTitle"></h1>
+        <p data-i18n="welcomeLead"></p>
+        <span class="thread" aria-hidden="true"></span>
+      </header>
+
+      <ol class="steps">
+        <li class="card">
+          <span class="num">1</span>
+          <div class="body">
+            <h2 data-i18n="welcomeShortcutTitle"></h2>
+            <p class="keys" id="shortcut-keys"></p>
+            <p data-i18n="welcomeShortcutText"></p>
+            <button id="shortcut-change" class="link" type="button" data-i18n="welcomeShortcutChange"></button>
+          </div>
+        </li>
+
+        <li class="card">
+          <span class="num">2</span>
+          <div class="body">
+            <h2 data-i18n="welcomePinTitle"></h2>
+            <p data-i18n="welcomePinText"></p>
+          </div>
+        </li>
+
+        <li class="card">
+          <span class="num">3</span>
+          <div class="body">
+            <div class="row">
+              <h2 data-i18n="welcomeSitesTitle"></h2>
+              <label class="switch"><input id="all-sites" type="checkbox" data-i18n-aria="allSites" /><i></i></label>
+            </div>
+            <p data-i18n="welcomeSitesText"></p>
+            <p id="sites-state" class="state" hidden></p>
+          </div>
+        </li>
+      </ol>
+
+      <footer>
+        <p data-i18n="welcomePrivacy"></p>
+        <p data-i18n="welcomeDone"></p>
+      </footer>
+    </main>
+    <script src="welcome.js"></script>
+  </body>
+</html>

@@ -44,7 +44,9 @@ function syncContentScript(): void {
     .catch((err) => console.error('[silk] failed to register content script', err))
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
+  // First install only (not updates): how to use the shortcut and where to turn on site access.
+  if (details.reason === 'install') void chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') })
   dropLegacySettings().catch((err) => console.error('[silk] failed to migrate settings', err))
   syncContentScript()
 })

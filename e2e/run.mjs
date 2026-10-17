@@ -66,6 +66,19 @@ try {
     chrome.scripting.registerContentScripts([{ id: 'e2e-content', matches: ['http://127.0.0.1/*'], js: ['content.js'], runAt: 'document_idle' }]),
   )
 
+  console.log('\n首次安装引导页')
+  await check('安装后自动打开引导页：显示快捷键 Alt+T 和「在所有网站启用」开关', async () => {
+    const isWelcome = (p) => p.url().endsWith('/welcome.html')
+    const welcome = context.pages().find(isWelcome) ?? (await context.waitForEvent('page', { predicate: isWelcome, timeout: 10000 }))
+    await welcome.waitForFunction(() => document.querySelector('#shortcut-keys kbd, #shortcut-keys .unset'))
+    const keys = await welcome.$$eval('#shortcut-keys kbd', (els) => els.map((el) => el.textContent).join('+'))
+    assert(keys === 'Alt+T', `shortcut shown: "${keys}"`)
+    assert(!(await welcome.$eval('#all-sites', (el) => el.checked)), 'site access is off right after install')
+    assert((await welcome.$eval('h1', (el) => el.textContent)).trim().length > 0, 'title rendered')
+    await welcome.screenshot({ path: join(OUT, '0-welcome.png'), fullPage: true })
+    await welcome.close()
+  })
+
   const page = await context.newPage()
   await page.goto(`${origin}/page`)
   await page.waitForFunction(() => document.querySelector('silk-ui'))
