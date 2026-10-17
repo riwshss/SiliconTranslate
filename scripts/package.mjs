@@ -92,6 +92,10 @@ function assertManifest(version) {
     manifest.action.default_popup,
     // Registered at runtime for the sites the user grants (see background), not in the manifest.
     'content.js',
+    // Opened by the background on first install.
+    'welcome.html',
+    'welcome.js',
+    'welcome.css',
   ]
   const missing = required.filter((file) => !statSync(join(DIST, file), { throwIfNoEntry: false }))
   if (missing.length) throw new Error(`dist/ is missing: ${missing.join(', ')}`)

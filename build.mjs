@@ -39,6 +39,7 @@ const configs = [
   { ...shared, entryPoints: { background: 'src/background/index.ts' }, outdir, format: 'esm' },
   { ...shared, entryPoints: { content: 'src/content/index.ts' }, outdir, format: 'iife' },
   { ...shared, entryPoints: { popup: 'src/popup/popup.ts' }, outdir, format: 'iife' },
+  { ...shared, entryPoints: { welcome: 'src/welcome/welcome.ts' }, outdir, format: 'iife' },
 ]
 
 /** The backend origin must be a host permission; beta builds say so in their name. */
@@ -57,6 +58,8 @@ function copyStatic() {
   cpSync('static', outdir, { recursive: true })
   cpSync('src/popup/popup.html', `${outdir}/popup.html`)
   cpSync('src/popup/popup.css', `${outdir}/popup.css`)
+  cpSync('src/welcome/welcome.html', `${outdir}/welcome.html`)
+  cpSync('src/welcome/welcome.css', `${outdir}/welcome.css`)
   // Same Silk & Ink tokens as the shadow-DOM UI (src/content/ui/styles.ts).
   writeFileSync(`${outdir}/tokens.css`, `/* Generated from src/shared/design-tokens.mjs. */\n${tokenCss(':root')}\n`)
   writeManifest()

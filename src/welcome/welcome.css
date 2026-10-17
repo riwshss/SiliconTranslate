@@ -1,0 +1,106 @@
+/* Silk & Ink (docs/DESIGN.md): colours, radii and timings come from tokens.css; no colour values here. */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/22px var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+button, input { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+.page { max-width: 560px; margin: 0 auto; padding: 56px 16px 40px; display: grid; gap: 20px; }
+
+.hero { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.logo { display: block; width: 56px; height: 56px; }
+h1 { margin: 8px 0 0; font-size: 24px; line-height: 32px; font-weight: 650; }
+.hero p { margin: 0; color: var(--muted); }
+/* The one decorative silk thread (DESIGN.md §1). */
+.thread { display: block; width: 32px; height: 1px; margin-top: 12px; background: var(--silk); }
+
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.card {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.num {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 650 13px/28px var(--font-ui);
+  text-align: center;
+}
+.body { flex: 1; min-width: 0; display: grid; gap: 8px; }
+h2 { margin: 0; font-size: 16px; line-height: 22px; font-weight: 650; }
+.body p { margin: 0; color: var(--muted); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+.keys { display: flex; gap: 4px; }
+kbd {
+  min-width: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  background: var(--card);
+  color: var(--ink);
+  font: 550 13px/26px var(--font-mono);
+  text-align: center;
+}
+.keys .unset { color: var(--warn); font-weight: 550; }
+
+.link {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-weight: 550;
+  cursor: pointer;
+}
+.link:hover { text-decoration: underline; }
+.link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+.state { color: var(--ok) !important; font-weight: 550; }
+
+.switch { position: relative; width: 36px; height: 20px; flex: none; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch i {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--faint) 45%, transparent);
+  transition: background var(--dur) var(--ease-silk);
+}
+.switch i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 1px 2px var(--line);
+  transition: transform var(--dur) var(--ease-silk);
+}
+.switch input:checked + i { background: var(--accent); }
+.switch input:checked + i::after { transform: translateX(16px); }
+.switch input:focus-visible + i { box-shadow: 0 0 0 3px var(--accent-soft); }
+
+footer { display: grid; gap: 4px; padding: 0 4px; text-align: center; font-size: 12px; line-height: 18px; color: var(--muted); }
+footer p { margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .switch i, .switch i::after { transition: none; }
+}
